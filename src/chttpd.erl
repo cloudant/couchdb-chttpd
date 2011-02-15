@@ -139,7 +139,9 @@ handle_request(MochiReq) ->
     % for the path, use the raw path with the query string and fragment
     % removed, but URL quoting left intact
     RawUri = MochiReq:get(raw_path),
-    {"/" ++ Path, _, _} = mochiweb_util:urlsplit_path(RawUri),
+    Customer = cloudant_util:customer_name(#httpd{mochi_req=MochiReq}),
+    {Path, _, _} = mochiweb_util:urlsplit_path(generate_customer_path(RawUri,
+        Customer)),
     {HandlerKey, _, _} = mochiweb_util:partition(Path, "/"),
 
     Peer = MochiReq:get(peer),
@@ -332,6 +334,28 @@ make_uri(Req, Raw) ->
     {[{<<"url">>,Url}, {<<"headers">>,{Headers}}]}.
 %%% end hack
 
+starts_with(String, SubString) ->
+    string:equal(string:substr(String, 1, erlang:min(string:len(String), string:len(SubString))), SubString).
+
+generate_customer_path("/", _Customer) ->
+    "";
+generate_customer_path("/favicon.ico", _Customer) ->
+    "favicon.ico";
+generate_customer_path([$/|RawPath], "") ->
+    RawPath;
+generate_customer_path([$/|RawPath], Customer) ->
+    case RawPath of
+    [$_|_Rest] ->
+        UsersDb = config:get("couch_httpd_auth", "authentication_db", "_users"),
+        case starts_with(RawPath, UsersDb) of
+        true ->
+            lists:flatten([Customer, "%2F", RawPath]);
+        false ->
+            RawPath
+        end;
+    _ ->
+        lists:flatten([Customer, "%2F", RawPath])
+    end.
 
 % Try authentication handlers in order until one returns a result
 authenticate_request(#httpd{user_ctx=#user_ctx{}} = Req, _AuthFuns) ->
@@ -447,7 +471,7 @@ qs(#httpd{mochi_req=MochiReq}) ->
 path(#httpd{mochi_req=MochiReq}) ->
     MochiReq:get(path).
 
-absolute_uri(#httpd{mochi_req=MochiReq}, Path) ->
+absolute_uri(#httpd{mochi_req=MochiReq} = Req, Path) ->
     XHost = config:get("httpd", "x_forwarded_host", "X-Forwarded-Host"),
     Host = case MochiReq:get_header_value(XHost) of
         undefined ->
@@ -478,7 +502,9 @@ absolute_uri(#httpd{mochi_req=MochiReq}, Path) ->
                     end
             end
     end,
-    Scheme ++ "://" ++ Host ++ Path.
+    CustomerRegex = ["^/", cloudant_util:customer_name(Req), "[/%2F]+"],
+    NewPath = re:replace(Path, CustomerRegex, "/", [{return,list}]),
+    Scheme ++ "://" ++ Host ++ NewPath.
 
 unquote(UrlEncodedString) ->
     mochiweb_util:unquote(UrlEncodedString).

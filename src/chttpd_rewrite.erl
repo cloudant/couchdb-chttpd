@@ -110,11 +110,13 @@
 
 
 handle_rewrite_req(#httpd{
-        path_parts=[DbName, <<"_design">>, DesignName, _Rewrite|PathParts],
+        path_parts=[DbName0, <<"_design">>, DesignName, _Rewrite|PathParts],
         method=Method,
         mochi_req=MochiReq}=Req, _Db, DDoc) ->
 
     % we are in a design handler
+    Customer = cloudant_util:customer_name(Req),
+    DbName = re:replace(DbName0, [$^,Customer,$/], "", [{return,binary}]),
     DesignId = <<"_design/", DesignName/binary>>,
     Prefix = <<"/", DbName/binary, "/", DesignId/binary>>,
     QueryList = lists:map(fun decode_query_value/1, couch_httpd:qs(Req)),

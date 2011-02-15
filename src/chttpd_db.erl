@@ -258,7 +258,7 @@ db_req(#httpd{method='GET',path_parts=[DbName]}=Req, _Db) ->
     {ok, DbInfo} = fabric:get_db_info(DbName),
     DeltaT = timer:now_diff(os:timestamp(), T0) / 1000,
     couch_stats:update_histogram([couchdb, dbinfo], DeltaT),
-    send_json(Req, {DbInfo});
+    send_json(Req, {cloudant_util:customer_db_info(Req, DbInfo)});
 
 db_req(#httpd{method='POST', path_parts=[DbName], user_ctx=Ctx}=Req, Db) ->
     couch_httpd:validate_ctype(Req, "application/json"),
