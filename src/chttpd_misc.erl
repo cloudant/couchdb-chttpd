@@ -89,7 +89,7 @@ handle_sleep_req(Req) ->
     send_method_not_allowed(Req, "GET,HEAD").
 
 handle_all_dbs_req(#httpd{method='GET'}=Req) ->
-    case cloudant_util:customer_name(Req) of
+    case cloudant_util:customer_path(Req) of
     "" ->
         Customer = "";
     Else ->

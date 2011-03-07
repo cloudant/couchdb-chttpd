@@ -115,7 +115,7 @@ handle_rewrite_req(#httpd{
         mochi_req=MochiReq}=Req, _Db, DDoc) ->
 
     % we are in a design handler
-    Customer = cloudant_util:customer_name(Req),
+    Customer = cloudant_util:customer_path(Req),
     DbName = re:replace(DbName0, [$^,Customer,$/], "", [{return,binary}]),
     DesignId = <<"_design/", DesignName/binary>>,
     Prefix = <<"/", DbName/binary, "/", DesignId/binary>>,

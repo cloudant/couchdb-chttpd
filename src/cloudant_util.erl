@@ -1,9 +1,9 @@
 -module(cloudant_util).
--export([customer_name/1, customer_db_info/2]).
+-export([customer_name/1, customer_db_info/2, customer_path/1]).
 
 customer_db_info(Req, Info) ->
     FullName = couch_util:get_value(db_name, Info),
-    Customer = customer_name(Req),
+    Customer = customer_path(Req),
     DbName = re:replace(FullName, [$^,Customer,$/], "", [{return,binary}]),
     lists:keyreplace(db_name, 1, Info, {db_name,DbName}).
 
@@ -12,10 +12,12 @@ customer_name(Req) ->
     undefined ->
         customer_from_host_header(chttpd:header_value(Req, "Host"));
     CloudantUser ->
-        MaybeDots = lists:takewhile(fun (C) -> C =/= $, end, CloudantUser),
-        Labels = string:tokens(MaybeDots, "."),
-        string:join(lists:reverse(Labels), "/")
+        lists:takewhile(fun (C) -> C =/= $, end, CloudantUser)
     end.
+
+customer_path(Req) ->
+    Labels = string:tokens(customer_name(Req), "."),
+    string:join(lists:reverse(Labels), "/").
 
 %% internal
 
