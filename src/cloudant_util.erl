@@ -12,7 +12,9 @@ customer_name(Req) ->
     undefined ->
         customer_from_host_header(chttpd:header_value(Req, "Host"));
     CloudantUser ->
-        lists:takewhile(fun (C) -> C =/= $, end, CloudantUser)
+        MaybeDots = lists:takewhile(fun (C) -> C =/= $, end, CloudantUser),
+        Labels = string:tokens(MaybeDots, "."),
+        string:join(lists:reverse(Labels), "/")
     end.
 
 %% internal
@@ -25,15 +27,15 @@ customer_from_host_header(Host) ->
     [Hostname|_Port] = string:tokens(Host, ":"),
     case lists:reverse(string:tokens(Hostname, ".")) of
     ["com", "cloudant", "us-east-1a" | Rest] ->
-        string:join(lists:reverse(Rest), ".");
+        string:join(Rest, "/");
     ["com", "cloudant", "us-east-1b" | Rest] ->
-        string:join(lists:reverse(Rest), ".");
+        string:join(Rest, "/");
     ["com", "cloudant", "seti" | Rest] ->
-        string:join(lists:reverse(Rest), ".");
+        string:join(Rest, "/");
     ["com", "cloudant", "cloudenvi" | Rest] ->
-        string:join(lists:reverse(Rest), ".");
+        string:join(Rest, "/");
     ["com", "cloudant" | Rest] ->
-        string:join(lists:reverse(Rest), ".");
+        string:join(Rest, "/");
     _ ->
         ""
     end.
