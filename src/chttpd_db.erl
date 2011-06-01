@@ -222,11 +222,12 @@ handle_design_info_req(Req, _Db, _DDoc) ->
 
 create_db_req(#httpd{}=Req, DbName) ->
     couch_httpd:verify_is_server_admin(Req),
+    validate_dbname(Req, DbName),
     N = couch_httpd:qs_value(Req, "n", config:get("cluster", "n", "3")),
     Q = couch_httpd:qs_value(Req, "q", config:get("cluster", "q", "8")),
     P = couch_httpd:qs_value(Req, "placement", config:get("cluster", "placement")),
     DocUrl = absolute_uri(Req, "/" ++ couch_util:url_encode(DbName)),
-    case fabric:create_db(DbName, [{n,N}, {q,Q}, {placement,P}]) of
+    case fabric:create_db(DbName, [{n,N}, {q,Q}, {placement,P}, {validate_name, false}]) of
     ok ->
         send_json(Req, 201, [{"Location", DocUrl}], {[{ok, true}]});
     accepted ->
@@ -235,6 +236,17 @@ create_db_req(#httpd{}=Req, DbName) ->
         chttpd:send_error(Req, file_exists);
     Error ->
         throw(Error)
+    end.
+
+validate_dbname(Req, DbName) ->
+    Customer = cloudant_util:customer_path(Req),
+    TrueName = re:replace(DbName, [$^, Customer, "[/]+"], ""),
+    AllowedRegex = "^[a-z][a-z0-9\\_\\$()\\+\\-\\/]*$",
+    case re:run(TrueName, AllowedRegex, [{capture,none}]) of
+    match ->
+        ok;
+    nomatch ->
+        throw({error, illegal_database_name})
     end.
 
 delete_db_req(#httpd{}=Req, DbName) ->
