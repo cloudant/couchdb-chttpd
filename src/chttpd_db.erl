@@ -240,10 +240,12 @@ create_db_req(#httpd{}=Req, DbName) ->
 
 validate_dbname(Req, DbName) ->
     Customer = chttpd_util:customer_path(Req),
-    TrueName = re:replace(DbName, [$^, Customer, "[/]+"], ""),
+    TrueName = re:replace(DbName, [$^, Customer, "[/]+"], "", [{return,list}]),
     AllowedRegex = "^[a-z][a-z0-9\\_\\$()\\+\\-\\/]*$",
     case re:run(TrueName, AllowedRegex, [{capture,none}]) of
     match ->
+        ok;
+    nomatch when TrueName =:= "_users" ->
         ok;
     nomatch ->
         throw({error, illegal_database_name})
