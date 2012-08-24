@@ -345,6 +345,8 @@ generate_customer_path([$/|RawPath], "") ->
     RawPath;
 generate_customer_path([$/|RawPath], Customer) ->
     case RawPath of
+    "_replicator" ->
+        lists:flatten([Customer, "%2F", RawPath]);
     [$_|_Rest] ->
         UsersDb = config:get("couch_httpd_auth", "authentication_db", "_users"),
         case starts_with(RawPath, UsersDb) of
