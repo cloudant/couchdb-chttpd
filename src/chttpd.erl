@@ -775,6 +775,9 @@ error_info({error, illegal_database_name}) ->
     {400, <<"illegal_database_name">>, <<"Only lowercase letters (a-z), "
         "digits (0-9), and any of the characters _, $, (, ), +, -, and / are "
         "allowed. Moreover, the database name must begin with a letter.">>};
+error_info({error, database_name_too_long}) ->
+    {400, <<"database_name_too_long">>, <<"The length of the database name must be no "
+        "more than 128 characters.">>};
 error_info({missing_stub, Reason}) ->
     {412, <<"missing_stub">>, Reason};
 error_info(request_entity_too_large) ->
