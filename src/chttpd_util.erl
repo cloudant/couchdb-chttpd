@@ -26,18 +26,14 @@ customer_from_host_header(undefined) ->
 customer_from_host_header("") ->
     "";
 customer_from_host_header(Host) ->
+    DomainStr = config:get("chttpd", "domain", "cloudant.com"),
+    Domain = lists:reverse(string:tokens(DomainStr, ".")),
     [Hostname|_Port] = string:tokens(Host, ":"),
-    case lists:reverse(string:tokens(Hostname, ".")) of
-    ["com", "cloudant", "us-east-1a" | Rest] ->
-        string:join(Rest, "/");
-    ["com", "cloudant", "us-east-1b" | Rest] ->
-        string:join(Rest, "/");
-    ["com", "cloudant", "seti" | Rest] ->
-        string:join(Rest, "/");
-    ["com", "cloudant", "cloudenvi" | Rest] ->
-        string:join(Rest, "/");
-    ["com", "cloudant" | Rest] ->
-        string:join(Rest, "/");
+    Hostname1 = lists:reverse(string:tokens(Hostname, ".")),
+    case lists:prefix(Domain, Hostname1) of
+    true ->
+        Rest = lists:nthtail(length(Domain)+1, Hostname1),
+        string:join(lists:reverse(Rest), ".");
     _ ->
         ""
     end.
