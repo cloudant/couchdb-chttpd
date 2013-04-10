@@ -32,7 +32,7 @@ customer_from_host_header(Host) ->
     Hostname1 = lists:reverse(string:tokens(Hostname, ".")),
     case lists:prefix(Domain, Hostname1) of
     true ->
-        Rest = lists:nthtail(length(Domain)+1, Hostname1),
+        Rest = lists:nthtail(length(Domain), Hostname1),
         string:join(lists:reverse(Rest), ".");
     _ ->
         ""
