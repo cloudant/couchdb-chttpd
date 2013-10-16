@@ -244,7 +244,7 @@ validate_dbname(Req, DbName) ->
     AllowedRegex = "^[a-z][a-z0-9\\_\\$()\\+\\-\\/]*$",
     case byte_size(DbName) =< 128 of
     true ->
-       case re:run(TrueName, AllowedRegex, [{capture,none}]) of
+       case re:run(TrueName, AllowedRegex, [{capture,none}, dollar_endonly]) of
        match ->
            ok;
        nomatch when TrueName =:= "_users" ->
