@@ -368,9 +368,11 @@ url_handler("_replicate") ->    fun chttpd_misc:handle_replicate_req/1;
 url_handler("_uuids") ->        fun chttpd_misc:handle_uuids_req/1;
 url_handler("_sleep") ->        fun chttpd_misc:handle_sleep_req/1;
 url_handler("_session") ->      fun chttpd_auth:handle_session_req/1;
+url_handler("_system") ->       fun chttpd_misc:handle_system_req/1;
 url_handler("_oauth") ->        fun couch_httpd_oauth:handle_oauth_req/1;
 url_handler("_up") ->           fun chttpd_misc:handle_up_req/1;
 url_handler("_membership") ->   fun mem3_httpd:handle_membership_req/1;
+url_handler("_search_analyze") -> fun dreyfus_httpd:handle_analyze_req/1;
 url_handler("_db_updates") ->   fun global_changes_httpd:handle_global_changes_req/1;
 url_handler(_) ->               fun chttpd_db:handle_request/1.
 
@@ -381,7 +383,11 @@ db_url_handlers() ->
         {<<"_design">>,         fun chttpd_db:handle_design_req/2},
         {<<"_temp_view">>,      fun chttpd_view:handle_temp_view_req/2},
         {<<"_changes">>,        fun chttpd_db:handle_changes_req/2},
-        {<<"_shards">>,         fun mem3_httpd:handle_shards_req/2}
+        {<<"_shards">>,         fun mem3_httpd:handle_shards_req/2},
+        {<<"_search_cleanup">>, fun dreyfus_httpd:handle_cleanup_req/2},
+        {<<"_geo_cleanup">>,    fun hastings_httpd:handle_cleanup_req/2},
+        {<<"_index">>,          fun mango_httpd:handle_req/2},
+        {<<"_find">>,           fun mango_httpd:handle_req/2}
     ].
 
 design_url_handlers() ->
@@ -391,7 +397,11 @@ design_url_handlers() ->
         {<<"_list">>,           fun chttpd_show:handle_view_list_req/3},
         {<<"_update">>,         fun chttpd_show:handle_doc_update_req/3},
         {<<"_info">>,           fun chttpd_db:handle_design_info_req/3},
-        {<<"_rewrite">>,        fun chttpd_rewrite:handle_rewrite_req/3}
+        {<<"_rewrite">>,        fun chttpd_rewrite:handle_rewrite_req/3},
+        {<<"_search">>,         fun dreyfus_httpd:handle_search_req/3},
+        {<<"_search_info">>,    fun dreyfus_httpd:handle_info_req/3},
+        {<<"_geo">>,            fun hastings_httpd:handle_search_req/3},
+        {<<"_geo_info">>,       fun hastings_httpd:handle_info_req/3}
     ].
 
 % Utilities
