@@ -196,6 +196,8 @@ handle_request(MochiReq) ->
     % put small token on heap to keep requests synced to backend calls
     erlang:put(nonce, couch_util:to_hex(crypto:rand_bytes(4))),
 
+    chttpd_util:set_custom_io_priority(HttpReq),
+
     % suppress duplicate log
     erlang:put(dont_log_request, true),
 

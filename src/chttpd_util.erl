@@ -1,5 +1,7 @@
 -module(chttpd_util).
--export([customer_name/1, customer_db_info/2, customer_path/1, customer_path/2]).
+-include_lib("couch/include/couch_db.hrl").
+
+-export([customer_name/1, customer_db_info/2, customer_path/1, customer_path/2, set_custom_io_priority/1]).
 
 -define(RESERVED_NAMESPACE, "default").
 
@@ -32,6 +34,16 @@ customer_path(Req, Validate) ->
     end,
     Labels = string:tokens(CustomerName, "."),
     string:join(lists:reverse(Labels), "/").
+
+set_custom_io_priority(#httpd{path_parts = []}) ->
+    ok;
+set_custom_io_priority(#httpd{path_parts = [DbName|_]} = Req) ->
+    case chttpd:header_value(Req, "x-couch-io-priority") of
+    "low" ->
+        erlang:put(io_priority, {low, DbName});
+    _ ->
+        erlang:erase(io_priority)
+    end.
 
 %% internal
 
