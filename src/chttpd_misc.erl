@@ -110,9 +110,13 @@ handle_all_dbs_req(#httpd{method='GET'}=Req) ->
     %% so it can be pushed thru fabric
     {ok, Info} = fabric:get_db_info(ShardDbName),
     Etag = couch_httpd:make_etag({Info, Customer}),
-    Args = couch_mrview_http:parse_params(Req, undefined),
-    #mrargs{start_key=SK, start_key_docid=SD, end_key=EK, end_key_docid=ED} = Args,
-    QueryArgs = Args#mrargs{
+    QA = #mrargs{
+        start_key = SK,
+        start_key_docid = SD,
+        end_key = EK,
+        end_key_docid = ED
+    } = couch_mrview_http:parse_params(Req, undefined),
+    QueryArgs = QA#mrargs{
         start_key = maybe_wrap_arg(SK, Customer, ?MIN_STR),
         start_key_docid = maybe_wrap_arg(SD, Customer, ?MIN_STR),
         end_key = maybe_wrap_arg(EK, Customer, ?MAX_STR),
@@ -121,8 +125,8 @@ handle_all_dbs_req(#httpd{method='GET'}=Req) ->
     Options = [{user_ctx, Req#httpd.user_ctx}],
     {ok, Resp} = chttpd:etag_respond(Req, Etag, fun() ->
         {ok, Resp} = chttpd:start_delayed_json_response(Req, 200, [{"Etag",Etag}]),
-        VAcc = #vacc{req=Req,resp=Resp,prefix=Customer},
-        fabric:all_docs(ShardDbName, Options, fun all_dbs_callback/2, VAcc, QueryArgs)
+        VAcc = {Customer, #vacc{req=Req,resp=Resp}},
+        fabric:all_docs(ShardDbName, Options, fun all_dbs_pre_cb/2, VAcc, QueryArgs)
     end),
     case is_record(Resp, vacc) of
         true -> {ok, Resp#vacc.resp};
@@ -131,10 +135,22 @@ handle_all_dbs_req(#httpd{method='GET'}=Req) ->
 handle_all_dbs_req(Req) ->
     send_method_not_allowed(Req, "GET,HEAD").
 
+
+all_dbs_pre_cb({row, Row}, {Customer, VAcc}) when Customer /= "" ->
+    DbName = re:replace(couch_util:get_value(id, Row), [$^, Customer], "",
+            [{return, binary}]),
+    NewRow = lists:keyreplace(id, 1, Row, {id, DbName}),
+    {Go, NewVAcc} = all_dbs_callback({row, NewRow}, VAcc),
+    {Go, {Customer, NewVAcc}};
+all_dbs_pre_cb(Else, {Customer, VAcc}) ->
+    {Go, NewVAcc} = all_dbs_callback(Else, VAcc),
+    {Go, {Customer, NewVAcc}}.
+
+
 all_dbs_callback({meta, _Meta}, #vacc{resp=Resp0}=Acc) ->
     {ok, Resp1} = chttpd:send_delayed_chunk(Resp0, "["),
     {ok, Acc#vacc{resp=Resp1}};
-all_dbs_callback({row, Row}, #vacc{resp=Resp0,prefix=""}=Acc) ->
+all_dbs_callback({row, Row}, #vacc{resp=Resp0}=Acc) ->
     Prepend = couch_mrview_http:prepend_val(Acc),
     case couch_util:get_value(id, Row) of <<"_design", _/binary>> ->
         {ok, Acc};
@@ -142,12 +158,6 @@ all_dbs_callback({row, Row}, #vacc{resp=Resp0,prefix=""}=Acc) ->
         {ok, Resp1} = chttpd:send_delayed_chunk(Resp0, [Prepend, ?JSON_ENCODE(DbName)]),
         {ok, Acc#vacc{prepend=",", resp=Resp1}}
     end;
-all_dbs_callback({row, Row}, #vacc{prefix=Prefix,resp=Resp0}=Acc) ->
-    Prepend = couch_mrview_http:prepend_val(Acc),
-    DbName = re:replace(couch_util:get_value(id, Row), [$^, Prefix], "",
-        [{return, binary}]),
-    {ok, Resp1} = chttpd:send_delayed_chunk(Resp0, [Prepend, ?JSON_ENCODE(DbName)]),
-    {ok, Acc#vacc{prepend=",",resp=Resp1}};
 all_dbs_callback(complete, #vacc{resp=Resp0}=Acc) ->
     {ok, Resp1} = chttpd:send_delayed_chunk(Resp0, "]"),
     {ok, Resp2} = chttpd:end_delayed_json_response(Resp1),

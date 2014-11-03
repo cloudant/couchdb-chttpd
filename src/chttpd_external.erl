@@ -86,6 +86,7 @@ json_req_obj(#httpd{mochi_req=Req,
     NoCustomer ->
         NoCustomer
     end,
+    FixedDb = Db#db{name=hd(FixedPath)},
     % add headers...
     {[{<<"info">>, {chttpd_util:customer_db_info(HttpReq, Info)}},
         {<<"uuid">>, couch_uuids:new()},
@@ -98,7 +99,7 @@ json_req_obj(#httpd{mochi_req=Req,
         {<<"peer">>, ?l2b(Req:get(peer))},
         {<<"form">>, to_json_terms(ParsedForm)},
         {<<"cookie">>, to_json_terms(Req:parse_cookie())},
-        {<<"userCtx">>, couch_util:json_user_ctx(Db#db{name=hd(FixedPath)})}]}.
+        {<<"userCtx">>, couch_util:json_user_ctx(FixedDb)}]}.
 
 to_json_terms(Data) ->
     to_json_terms(Data, []).
