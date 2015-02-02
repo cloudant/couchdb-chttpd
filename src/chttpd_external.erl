@@ -78,7 +78,7 @@ json_req_obj(#httpd{mochi_req=Req,
     {ok, Info} = fabric:get_db_info(Db),
 
     % send correct path to customer - BugzID 6849
-    CustomerBin = list_to_binary(cloudant_util:customer_path(HttpReq)),
+    CustomerBin = list_to_binary(chttpd_util:customer_path(HttpReq)),
     Len = byte_size(CustomerBin),
     FixedPath = case Path of
     [<<CustomerBin:Len/binary, "/", DbName/binary>> | Rest] ->
@@ -87,7 +87,7 @@ json_req_obj(#httpd{mochi_req=Req,
         NoCustomer
     end,
     % add headers...
-    {[{<<"info">>, {cloudant_util:customer_db_info(HttpReq, Info)}},
+    {[{<<"info">>, {chttpd_util:customer_db_info(HttpReq, Info)}},
         {<<"uuid">>, couch_uuids:new()},
         {<<"id">>, DocId},
         {<<"method">>, Method},

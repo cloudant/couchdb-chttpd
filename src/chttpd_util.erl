@@ -1,4 +1,4 @@
--module(cloudant_util).
+-module(chttpd_util).
 -export([customer_name/1, customer_db_info/2, customer_path/1]).
 
 customer_db_info(Req, Info) ->
