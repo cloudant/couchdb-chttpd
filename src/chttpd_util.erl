@@ -8,11 +8,11 @@ customer_db_info(Req, Info) ->
     lists:keyreplace(db_name, 1, Info, {db_name,DbName}).
 
 customer_name(Req) ->
-    case chttpd:header_value(Req, "X-Cloudant-User") of
+    case chttpd:header_value(Req, "X-Couch-User") of
     undefined ->
         customer_from_host_header(chttpd:header_value(Req, "Host"), config:get("chttpd", "domain", ""));
-    CloudantUser ->
-        lists:takewhile(fun (C) -> C =/= $, end, CloudantUser)
+    CouchUser ->
+        lists:takewhile(fun (C) -> C =/= $, end, CouchUser)
     end.
 
 customer_path(Req) ->
