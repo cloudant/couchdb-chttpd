@@ -10,7 +10,7 @@ customer_db_info(Req, Info) ->
 customer_name(Req) ->
     case chttpd:header_value(Req, "X-Cloudant-User") of
     undefined ->
-        customer_from_host_header(chttpd:header_value(Req, "Host"));
+        customer_from_host_header(chttpd:header_value(Req, "Host"), config:get("chttpd", "domain", ""));
     CloudantUser ->
         lists:takewhile(fun (C) -> C =/= $, end, CloudantUser)
     end.
@@ -21,12 +21,13 @@ customer_path(Req) ->
 
 %% internal
 
-customer_from_host_header(undefined) ->
+customer_from_host_header(undefined, _DomainStr) ->
     "";
-customer_from_host_header("") ->
+customer_from_host_header("", _DomainStr) ->
     "";
-customer_from_host_header(Host) ->
-    DomainStr = config:get("chttpd", "domain", "cloudant.com"),
+customer_from_host_header(_Host, "") ->
+    "";
+customer_from_host_header(Host, DomainStr) ->
     Domain = lists:reverse(string:tokens(DomainStr, ".")),
     [Hostname|_Port] = string:tokens(Host, ":"),
     Hostname1 = lists:reverse(string:tokens(Hostname, ".")),
