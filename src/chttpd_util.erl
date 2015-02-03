@@ -1,5 +1,5 @@
 -module(chttpd_util).
--export([customer_name/1, customer_db_info/2, customer_path/1]).
+-export([customer_name/1, customer_db_info/2, customer_path/1, customer_path/2]).
 
 -define(RESERVED_NAMESPACE, "default").
 
@@ -18,7 +18,19 @@ customer_name(Req) ->
     end.
 
 customer_path(Req) ->
-    Labels = string:tokens(customer_name(Req), "."),
+    customer_path(Req, true).
+
+customer_path(Req, Validate) ->
+    DefaultNamespace = config:get("chttpd", "reserved_namespace", ?RESERVED_NAMESPACE),
+    CustomerName = case {customer_name(Req), Validate} of
+    {DefaultNamespace, true} ->
+        throw({bad_request, <<"Attempted to use reserved namespace">>});
+    {undefined, _} ->
+        DefaultNamespace;
+    {Else, _} ->
+        Else
+    end,
+    Labels = string:tokens(CustomerName, "."),
     string:join(lists:reverse(Labels), "/").
 
 %% internal
@@ -32,7 +44,7 @@ customer_from_host_header(Host, DomainStr) when is_list(Host), is_list(DomainStr
         Rest = lists:nthtail(length(Domain), Hostname1),
         string:join(lists:reverse(Rest), ".");
     _ ->
-        config:get("chttpd", "reserved_namespace", ?RESERVED_NAMESPACE)
+        undefined
     end;
 customer_from_host_header(_Host, _DomainStr) ->
-    config:get("chttpd", "reserved_namespace", ?RESERVED_NAMESPACE).
+    undefined.

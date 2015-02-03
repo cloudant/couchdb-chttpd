@@ -139,7 +139,7 @@ handle_request(MochiReq) ->
     % for the path, use the raw path with the query string and fragment
     % removed, but URL quoting left intact
     RawUri = MochiReq:get(raw_path),
-    Customer = quote(chttpd_util:customer_path(#httpd{mochi_req=MochiReq})),
+    Customer = quote(chttpd_util:customer_path(#httpd{mochi_req=MochiReq}, false)),
     {Path, _, _} = mochiweb_util:urlsplit_path(generate_customer_path(RawUri,
         Customer)),
     {HandlerKey, _, _} = mochiweb_util:partition(Path, "/"),
