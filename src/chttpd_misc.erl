@@ -88,6 +88,16 @@ handle_sleep_req(#httpd{method='GET'}=Req) ->
 handle_sleep_req(Req) ->
     send_method_not_allowed(Req, "GET,HEAD").
 
+maybe_wrap_arg(Key, Pre, Post) ->
+    case Key of
+    undefined ->
+        ?l2b([Pre, Post]);
+    Key when is_binary(Key) ->
+        ?l2b([Pre, Key, Post]);
+    Key ->
+        Key
+    end.
+
 handle_all_dbs_req(#httpd{method='GET'}=Req) ->
     case chttpd_util:customer_path(Req) of
     "" ->
@@ -103,10 +113,10 @@ handle_all_dbs_req(#httpd{method='GET'}=Req) ->
     Args = couch_mrview_http:parse_params(Req, undefined),
     #mrargs{start_key=SK, start_key_docid=SD, end_key=EK, end_key_docid=ED} = Args,
     QueryArgs = Args#mrargs{
-        start_key = if is_binary(SK) -> ?l2b([Customer, SK]); true -> SK end,
-        start_key_docid = if is_binary(SD) -> ?l2b([Customer, SD]); true -> SD end,
-        end_key = if is_binary(EK) -> ?l2b([Customer, EK]); true -> EK end,
-        end_key_docid = if is_binary(ED) -> ?l2b([Customer, ED]); true -> ED end
+        start_key = maybe_wrap_arg(SK, Customer, ?MIN_STR),
+        start_key_docid = maybe_wrap_arg(SD, Customer, ?MIN_STR),
+        end_key = maybe_wrap_arg(EK, Customer, ?MAX_STR),
+        end_key_docid = maybe_wrap_arg(ED, Customer, ?MAX_STR)
     },
     Options = [{user_ctx, Req#httpd.user_ctx}],
     {ok, Resp} = chttpd:etag_respond(Req, Etag, fun() ->
