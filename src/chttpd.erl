@@ -139,7 +139,9 @@ handle_request(MochiReq) ->
     % for the path, use the raw path with the query string and fragment
     % removed, but URL quoting left intact
     RawUri = MochiReq:get(raw_path),
-    {"/" ++ Path, _, _} = mochiweb_util:urlsplit_path(RawUri),
+    Customer = quote(chttpd_util:customer_path(#httpd{mochi_req=MochiReq}, false)),
+    {Path, _, _} = mochiweb_util:urlsplit_path(generate_customer_path(RawUri,
+        Customer)),
     {HandlerKey, _, _} = mochiweb_util:partition(Path, "/"),
 
     Peer = MochiReq:get(peer),
@@ -193,6 +195,8 @@ handle_request(MochiReq) ->
 
     % put small token on heap to keep requests synced to backend calls
     erlang:put(nonce, couch_util:to_hex(crypto:rand_bytes(4))),
+
+    chttpd_util:set_custom_io_priority(HttpReq),
 
     % suppress duplicate log
     erlang:put(dont_log_request, true),
@@ -253,8 +257,18 @@ handle_request(MochiReq) ->
         {aborted, Resp:get(code)}
     end,
     Host = MochiReq:get_header_value("Host"),
-    couch_log:notice("~s ~s ~s ~s ~s ~B ~p ~B", [get(nonce), Peer, Host,
-        atom_to_list(Method1), RawUri, Code, Status, round(RequestTime)]),
+    XCouchUser = MochiReq:get_header_value("X-Couch-User"),
+    couch_log:notice("~s ~s ~s ~s ~s ~s ~B ~p ~B", [
+            get(nonce),
+            Peer,
+            XCouchUser,
+            Host,
+            atom_to_list(Method1),
+            RawUri,
+            Code,
+            Status,
+            round(RequestTime)
+        ]),
     couch_stats:update_histogram([couchdb, request_time], RequestTime),
     case Result of
     {ok, _} ->
@@ -332,6 +346,28 @@ make_uri(Req, Raw) ->
     {[{<<"url">>,Url}, {<<"headers">>,{Headers}}]}.
 %%% end hack
 
+starts_with(String, SubString) ->
+    string:equal(string:substr(String, 1, erlang:min(string:len(String), string:len(SubString))), SubString).
+
+generate_customer_path("/", _Customer) ->
+    "";
+generate_customer_path("/favicon.ico", _Customer) ->
+    "favicon.ico";
+generate_customer_path([$/|RawPath], "") ->
+    RawPath;
+generate_customer_path([$/|RawPath], Customer) ->
+    case RawPath of
+    [$_|_Rest] ->
+        UsersDb = config:get("couch_httpd_auth", "authentication_db", "_users"),
+        case starts_with(RawPath, UsersDb) orelse starts_with(RawPath, "_replicator") of
+        true ->
+            lists:flatten([Customer, "%2F", RawPath]);
+        false ->
+            RawPath
+        end;
+    _ ->
+        lists:flatten([Customer, "%2F", RawPath])
+    end.
 
 % Try authentication handlers in order until one returns a result
 authenticate_request(#httpd{user_ctx=#user_ctx{}} = Req, _AuthFuns) ->
@@ -447,7 +483,7 @@ qs(#httpd{mochi_req=MochiReq}) ->
 path(#httpd{mochi_req=MochiReq}) ->
     MochiReq:get(path).
 
-absolute_uri(#httpd{mochi_req=MochiReq}, Path) ->
+absolute_uri(#httpd{mochi_req=MochiReq} = Req, Path) ->
     XHost = config:get("httpd", "x_forwarded_host", "X-Forwarded-Host"),
     Host = case MochiReq:get_header_value(XHost) of
         undefined ->
@@ -478,7 +514,9 @@ absolute_uri(#httpd{mochi_req=MochiReq}, Path) ->
                     end
             end
     end,
-    Scheme ++ "://" ++ Host ++ Path.
+    CustomerRegex = ["^/", chttpd_util:customer_path(Req), "[/%2F]+"],
+    NewPath = re:replace(Path, CustomerRegex, "/", [{return,list}]),
+    Scheme ++ "://" ++ Host ++ NewPath.
 
 unquote(UrlEncodedString) ->
     mochiweb_util:unquote(UrlEncodedString).
@@ -749,6 +787,9 @@ error_info({error, illegal_database_name}) ->
     {400, <<"illegal_database_name">>, <<"Only lowercase letters (a-z), "
         "digits (0-9), and any of the characters _, $, (, ), +, -, and / are "
         "allowed. Moreover, the database name must begin with a letter.">>};
+error_info({error, database_name_too_long}) ->
+    {400, <<"database_name_too_long">>, <<"The length of the database name must be no "
+        "more than 128 characters.">>};
 error_info({missing_stub, Reason}) ->
     {412, <<"missing_stub">>, Reason};
 error_info(request_entity_too_large) ->

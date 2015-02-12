@@ -222,11 +222,12 @@ handle_design_info_req(Req, _Db, _DDoc) ->
 
 create_db_req(#httpd{}=Req, DbName) ->
     couch_httpd:verify_is_server_admin(Req),
+    validate_dbname(Req, DbName),
     N = couch_httpd:qs_value(Req, "n", config:get("cluster", "n", "3")),
     Q = couch_httpd:qs_value(Req, "q", config:get("cluster", "q", "8")),
     P = couch_httpd:qs_value(Req, "placement", config:get("cluster", "placement")),
     DocUrl = absolute_uri(Req, "/" ++ couch_util:url_encode(DbName)),
-    case fabric:create_db(DbName, [{n,N}, {q,Q}, {placement,P}]) of
+    case fabric:create_db(DbName, [{n,N}, {q,Q}, {placement,P}, {validate_name, false}]) of
     ok ->
         send_json(Req, 201, [{"Location", DocUrl}], {[{ok, true}]});
     accepted ->
@@ -235,6 +236,26 @@ create_db_req(#httpd{}=Req, DbName) ->
         chttpd:send_error(Req, file_exists);
     Error ->
         throw(Error)
+    end.
+
+validate_dbname(Req, DbName) ->
+    Customer = chttpd_util:customer_path(Req),
+    TrueName = re:replace(DbName, [$^, Customer, "[/]+"], "", [{return,list}]),
+    AllowedRegex = "^[a-z][a-z0-9\\_\\$()\\+\\-\\/]*$",
+    case byte_size(DbName) =< 128 of
+    true ->
+       case re:run(TrueName, AllowedRegex, [{capture,none}, dollar_endonly]) of
+       match ->
+           ok;
+       nomatch when TrueName =:= "_users" ->
+           ok;
+       nomatch when TrueName =:= "_replicator" ->
+           ok;
+       nomatch ->
+           throw({error, illegal_database_name})
+       end;
+    false ->
+        throw({error, database_name_too_long})
     end.
 
 delete_db_req(#httpd{}=Req, DbName) ->
@@ -258,7 +279,7 @@ db_req(#httpd{method='GET',path_parts=[DbName]}=Req, _Db) ->
     {ok, DbInfo} = fabric:get_db_info(DbName),
     DeltaT = timer:now_diff(os:timestamp(), T0) / 1000,
     couch_stats:update_histogram([couchdb, dbinfo], DeltaT),
-    send_json(Req, {DbInfo});
+    send_json(Req, {chttpd_util:customer_db_info(Req, DbInfo)});
 
 db_req(#httpd{method='POST', path_parts=[DbName], user_ctx=Ctx}=Req, Db) ->
     couch_httpd:validate_ctype(Req, "application/json"),

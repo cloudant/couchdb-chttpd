@@ -88,18 +88,45 @@ handle_sleep_req(#httpd{method='GET'}=Req) ->
 handle_sleep_req(Req) ->
     send_method_not_allowed(Req, "GET,HEAD").
 
+maybe_wrap_arg(Key, Pre, Post) ->
+    case Key of
+    undefined ->
+        ?l2b([Pre, Post]);
+    Key when is_binary(Key) ->
+        ?l2b([Pre, Key, Post]);
+    Key ->
+        Key
+    end.
+
 handle_all_dbs_req(#httpd{method='GET'}=Req) ->
-    Args = couch_mrview_http:parse_params(Req, undefined),
+    case chttpd_util:customer_path(Req) of
+    "" ->
+        Customer = "";
+    Else ->
+        Customer = [Else, $/]
+    end,
     ShardDbName = config:get("mem3", "shard_db", "dbs"),
     %% shard_db is not sharded but mem3:shards treats it as an edge case
     %% so it can be pushed thru fabric
     {ok, Info} = fabric:get_db_info(ShardDbName),
-    Etag = couch_httpd:make_etag({Info}),
+    Etag = couch_httpd:make_etag({Info, Customer}),
+    QA = #mrargs{
+        start_key = SK,
+        start_key_docid = SD,
+        end_key = EK,
+        end_key_docid = ED
+    } = couch_mrview_http:parse_params(Req, undefined),
+    QueryArgs = QA#mrargs{
+        start_key = maybe_wrap_arg(SK, Customer, ?MIN_STR),
+        start_key_docid = maybe_wrap_arg(SD, Customer, ?MIN_STR),
+        end_key = maybe_wrap_arg(EK, Customer, ?MAX_STR),
+        end_key_docid = maybe_wrap_arg(ED, Customer, ?MAX_STR)
+    },
     Options = [{user_ctx, Req#httpd.user_ctx}],
     {ok, Resp} = chttpd:etag_respond(Req, Etag, fun() ->
         {ok, Resp} = chttpd:start_delayed_json_response(Req, 200, [{"Etag",Etag}]),
-        VAcc = #vacc{req=Req,resp=Resp},
-        fabric:all_docs(ShardDbName, Options, fun all_dbs_callback/2, VAcc, Args)
+        VAcc = {Customer, #vacc{req=Req,resp=Resp}},
+        fabric:all_docs(ShardDbName, Options, fun all_dbs_pre_cb/2, VAcc, QueryArgs)
     end),
     case is_record(Resp, vacc) of
         true -> {ok, Resp#vacc.resp};
@@ -107,6 +134,18 @@ handle_all_dbs_req(#httpd{method='GET'}=Req) ->
     end;
 handle_all_dbs_req(Req) ->
     send_method_not_allowed(Req, "GET,HEAD").
+
+
+all_dbs_pre_cb({row, Row}, {Customer, VAcc}) when Customer /= "" ->
+    DbName = re:replace(couch_util:get_value(id, Row), [$^, Customer], "",
+            [{return, binary}]),
+    NewRow = lists:keyreplace(id, 1, Row, {id, DbName}),
+    {Go, NewVAcc} = all_dbs_callback({row, NewRow}, VAcc),
+    {Go, {Customer, NewVAcc}};
+all_dbs_pre_cb(Else, {Customer, VAcc}) ->
+    {Go, NewVAcc} = all_dbs_callback(Else, VAcc),
+    {Go, {Customer, NewVAcc}}.
+
 
 all_dbs_callback({meta, _Meta}, #vacc{resp=Resp0}=Acc) ->
     {ok, Resp1} = chttpd:send_delayed_chunk(Resp0, "["),
