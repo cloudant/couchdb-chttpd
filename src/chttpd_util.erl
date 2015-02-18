@@ -2,6 +2,7 @@
 -include_lib("couch/include/couch_db.hrl").
 
 -export([customer_name/1, customer_db_info/2, customer_path/1, customer_path/2, set_custom_io_priority/1]).
+-export([reserved_namespace/0]).
 
 -define(RESERVED_NAMESPACE, "default").
 
@@ -44,6 +45,9 @@ set_custom_io_priority(#httpd{path_parts = [DbName|_]} = Req) ->
     _ ->
         erlang:erase(io_priority)
     end.
+
+reserved_namespace() ->
+    ?RESERVED_NAMESPACE.
 
 %% internal
 
