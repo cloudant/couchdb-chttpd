@@ -143,7 +143,8 @@ load_user_from_db(UserName) ->
     end.
 
 dbname() ->
-    config:get("chttpd_auth", "authentication_db", "_users").
+    Namespace = chttpd_util:reserved_namespace(),
+    config:get("chttpd_auth", "authentication_db", Namespace ++ "/_users").
 
 docid(UserName) ->
     <<"org.couchdb.user:", UserName/binary>>.
