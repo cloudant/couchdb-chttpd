@@ -76,7 +76,7 @@ json_req_obj(#httpd{mochi_req=Req,
     end,
     Headers = Req:get(headers),
     Hlist = mochiweb_headers:to_list(Headers),
-    {ok, Info} = get_db_info(Db),
+    {ok, Info} = couch_db:get_db_info(Db),
 
     % add headers...
     {[{<<"info">>, {Info}},
@@ -95,10 +95,6 @@ json_req_obj(#httpd{mochi_req=Req,
         {<<"userCtx">>, couch_util:json_user_ctx(Db)},
         {<<"secObj">>, couch_db:get_security(Db)}]}.
 
-get_db_info(#db{main_pid = nil} = Db) ->
-    fabric:get_db_info(Db);
-get_db_info(#db{} = Db) ->
-    couch_db:get_db_info(Db).
 
 to_json_terms(Data) ->
     to_json_terms(Data, []).
