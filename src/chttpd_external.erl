@@ -76,7 +76,8 @@ json_req_obj(#httpd{mochi_req=Req,
     end,
     Headers = Req:get(headers),
     Hlist = mochiweb_headers:to_list(Headers),
-    {ok, Info} = couch_db:get_db_info(Db),
+
+    {ok, Info} = get_db_info(Db),
 
     % add headers...
     {[{<<"info">>, {Info}},
@@ -176,3 +177,23 @@ default_or_content_type(DefaultContentType, Headers) ->
     true ->
         Headers
     end.
+
+
+get_db_info(Db) ->
+    case couch_db:is_clustered_db(Db) of
+        true ->
+            DbName = couch_db:name(Db),
+            Ref = spawn_monitor(fun() ->
+                exit(fabric:get_db_info(DbName))
+            end),
+            Timeout = fabric_util:request_timeout(),
+            receive
+                {'DOWN', Ref, _, _, Resp} ->
+                    Resp
+            after Timeout ->
+                {error, timeout}
+            end;
+        false ->
+            couch_db:get_db_info(Db)
+    end.
+
