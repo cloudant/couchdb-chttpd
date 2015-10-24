@@ -94,7 +94,7 @@ json_req_obj(#httpd{mochi_req=Req,
         {<<"form">>, to_json_terms(ParsedForm)},
         {<<"cookie">>, to_json_terms(Req:parse_cookie())},
         {<<"userCtx">>, couch_util:json_user_ctx(Db)},
-        {<<"secObj">>, couch_db:get_security(Db)}]}.
+        {<<"secObj">>, get_security(Db)}]}.
 
 
 to_json_terms(Data) ->
@@ -195,5 +195,24 @@ get_db_info(Db) ->
             end;
         false ->
             couch_db:get_db_info(Db)
+    end.
+
+
+get_security(Db) ->
+    case couch_db:is_clustered_db(Db) of
+        true ->
+            DbName = couch_db:name(Db),
+            {_, Ref} = spawn_monitor(fun() ->
+                exit(fabric:get_security(DbName))
+            end),
+            Timeout = fabric_util:request_timeout(),
+            receive
+                {'DOWN', Ref, _, _, Resp} ->
+                    Resp
+            after Timeout ->
+                {error, timeout}
+            end;
+        false ->
+            couch_db:get_security(Db)
     end.
 
