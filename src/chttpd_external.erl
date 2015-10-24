@@ -183,7 +183,7 @@ get_db_info(Db) ->
     case couch_db:is_clustered_db(Db) of
         true ->
             DbName = couch_db:name(Db),
-            Ref = spawn_monitor(fun() ->
+            {_, Ref} = spawn_monitor(fun() ->
                 exit(fabric:get_db_info(DbName))
             end),
             Timeout = fabric_util:request_timeout(),
