@@ -657,31 +657,53 @@ verify_is_server_admin(#httpd{user_ctx=#user_ctx{roles=Roles}}) ->
     false -> throw({unauthorized, <<"You are not a server admin.">>})
     end.
 
-start_response_length(#httpd{mochi_req=MochiReq}=Req, Code, Headers0, Length) ->
-    couch_stats:increment_counter([couchdb, httpd_status_codes, Code]),
-    Headers1 = Headers0 ++ server_header() ++
-	couch_httpd_auth:cookie_auth_header(Req, Headers0),
-    Headers2 = chttpd_cors:headers(Req, Headers1),
-    Resp = MochiReq:start_response_length({Code, Headers2, Length}),
-    case MochiReq:get(method) of
-    'HEAD' -> throw({http_head_abort, Resp});
-    _ -> ok
+start_response_length(Req, Code, Headers0, Length) ->
+    Headers = basic_headers(Req, Headers0),
+    {Resp, _, _, _} = maybe_modify_and_call(
+        fun start_response_/2, Req, Code, Headers, Length),
+    case method(Resp) of
+        'HEAD' -> throw({http_head_abort, Resp});
+        _ -> ok
     end,
     {ok, Resp}.
+
+basic_headers(Req, Headers0) ->
+    Headers = Headers0 ++ server_header() ++
+        couch_httpd_auth:cookie_auth_header(Req, Headers0),
+    couch_httpd_cors:cors_headers(Req, Headers).
+
+method(MochiResp) ->
+    MochiReq = MochiResp:get(request),
+    MochiReq:get(method).
+
+%% maybe modify Req, Code, Headers, and Val via before_response plugins,
+%% then call Fun on those modified parameters
+maybe_modify_and_call(Fun, Req0, Code0, Headers0, Val0) ->
+    {ok, {Req, Code, Headers, Val}} =
+        chttpd_plugin:before_response(Req0, Code0, Headers0, Val0),
+    couch_stats:increment_counter([couchdb, httpd_status_codes, Code]),
+    {Fun(Req, {Code, Headers, Val}), Code, Headers, Val}.
+
+%% wrappers to treat mochiweb "method" as a fun
+start_response_(#httpd{mochi_req = MochiReq}, {Code, Headers, undefined}) ->
+    MochiReq:start_response({Code, Headers});
+start_response_(#httpd{mochi_req = MochiReq}, {Code, Headers, Length}) ->
+    MochiReq:start_response_length({Code, Headers, Length}).
+
+respond_(#httpd{mochi_req = MochiReq}, {Code, Headers, Body}) ->
+    MochiReq:respond({Code, Headers, Body}).
 
 send(Resp, Data) ->
     Resp:send(Data),
     {ok, Resp}.
 
-start_chunked_response(#httpd{mochi_req=MochiReq}=Req, Code, Headers0) ->
-    couch_stats:increment_counter([couchdb, httpd_status_codes, Code]),
-    Headers1 = Headers0 ++ server_header() ++
-        couch_httpd_auth:cookie_auth_header(Req, Headers0),
-    Headers2 = chttpd_cors:headers(Req, Headers1),
-    Resp = MochiReq:respond({Code, Headers2, chunked}),
-    case MochiReq:get(method) of
-    'HEAD' -> throw({http_head_abort, Resp});
-    _ -> ok
+start_chunked_response(Req, Code, Headers0) ->
+    Headers = basic_headers(Req, Headers0),
+    {Resp, _, _, _} = maybe_modify_and_call(
+        fun respond_/2, Req, Code, Headers, chunked),
+    case method(Resp) of
+        'HEAD' -> throw({http_head_abort, Resp});
+        _ -> ok
     end,
     {ok, Resp}.
 
@@ -692,13 +714,9 @@ send_chunk(Resp, Data) ->
 send_response(#httpd{}=Req0, Code0, Headers0, Body0) ->
     Headers1 = Headers0 ++ server_header() ++
 	[timing(), reqid() | couch_httpd_auth:cookie_auth_header(Req0, Headers0)],
-
-    {ok, {#httpd{mochi_req=MochiReq}, Code, Headers, Body}} =
-        chttpd_plugin:before_response(Req0, Code0, Headers1, Body0),
-
-    couch_stats:increment_counter([couchdb, httpd_status_codes, Code]),
-    {ok, MochiReq:respond({Code, Headers, Body})}.
-
+    {Resp, _, _, _} = maybe_modify_and_call(
+        fun respond_/2, Req0, Code0, Headers1, Body0),
+    {ok, Resp}.
 
 send_method_not_allowed(Req, Methods) ->
     send_error(Req, 405, [{"Allow", Methods}], <<"method_not_allowed">>,
