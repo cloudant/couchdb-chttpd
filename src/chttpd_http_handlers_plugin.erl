@@ -10,7 +10,7 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(chttpd_handlers).
+-module(chttpd_http_handlers_plugin).
 
 -export([
     url_handler/1,
@@ -18,7 +18,7 @@
     design_handler/1
 ]).
 
--define(SERVICE_ID, chttpd_handlers).
+-define(SERVICE_ID, http_clustered_handlers).
 
 -include_lib("couch/include/couch_db.hrl").
 

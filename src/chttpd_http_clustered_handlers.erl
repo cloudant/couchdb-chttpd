@@ -10,7 +10,7 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(chttpd_httpd_handlers).
+-module(chttpd_http_clustered_handlers).
 
 -export([url_handler/1, db_handler/1, design_handler/1]).
 
