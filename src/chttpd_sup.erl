@@ -17,17 +17,15 @@
 -export([start_link/1]).
 
 %% Helper macro for declaring children of supervisor
--define(CHILD(I, Type), {I, {I, start_link, []}, permanent, 100, Type, [I]}).
+-define(CHILD(I, Type, A), {I, {I, start_link, A}, permanent, 100, Type, [I]}).
 
 start_link(Args) ->
     supervisor:start_link({local,?MODULE}, ?MODULE, Args).
 
 init([]) ->
-    chttpd_config_listener:subscribe(),
-
     Children = [
-        ?CHILD(chttpd, worker),
-        ?CHILD(chttpd_auth_cache, worker),
+        ?CHILD(chttpd_http_stack, worker, [http]),
+        ?CHILD(chttpd_auth_cache, worker, []),
         {chttpd_auth_cache_lru,
 	 {ets_lru, start_link, [chttpd_auth_cache_lru, lru_opts()]},
 	 permanent, 5000, worker, [ets_lru]}

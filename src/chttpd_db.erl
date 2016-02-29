@@ -57,7 +57,8 @@
     orelse T == <<"_design_docs">>)).
 
 % Database request handlers
-handle_request(#httpd{path_parts=[DbName|RestParts],method=Method}=Req)->
+handle_request(#httpd{path_parts=[DbName|RestParts],method=Method,
+        stack = Stack}=Req)->
     case {Method, RestParts} of
     {'PUT', []} ->
         create_db_req(Req, DbName);
@@ -73,7 +74,7 @@ handle_request(#httpd{path_parts=[DbName|RestParts],method=Method}=Req)->
     {_, []} ->
         do_db_req(Req, fun db_req/2);
     {_, [SecondPart|_]} ->
-        Handler = chttpd_handlers:db_handler(SecondPart, fun db_req/2),
+        Handler = couch_httpd_handlers:db_handler(SecondPart, Stack),
         do_db_req(Req, Handler)
     end.
 

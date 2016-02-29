@@ -13,9 +13,9 @@
 -module(chttpd_handlers).
 
 -export([
-    url_handler/2,
-    db_handler/2,
-    design_handler/2
+    url_handler/1,
+    db_handler/1,
+    design_handler/1
 ]).
 
 -define(SERVICE_ID, chttpd_handlers).
@@ -26,61 +26,15 @@
 %% API Function Definitions
 %% ------------------------------------------------------------------
 
-url_handler(HandlerKey, DefaultFun) ->
-    select(collect(url_handler, [HandlerKey]), DefaultFun).
+url_handler(HandlerKey) ->
+    Default = fun chttpd_db:handle_request/1,
+    couch_httpd_handlers:select(?SERVICE_ID, url_handler, HandlerKey, Default).
 
-db_handler(HandlerKey, DefaultFun) ->
-    select(collect(db_handler, [HandlerKey]), DefaultFun).
+db_handler(HandlerKey) ->
+    Default = fun chttpd_db:db_req/2,
+    couch_httpd_handlers:select(?SERVICE_ID, db_handler, HandlerKey, Default).
 
-design_handler(HandlerKey, DefaultFun) ->
-    select(collect(design_handler, [HandlerKey]), DefaultFun).
 
-%% ------------------------------------------------------------------
-%% Internal Function Definitions
-%% ------------------------------------------------------------------
-
-collect(Func, Args) ->
-    Results = do_apply(Func, Args, []),
-    [HandlerFun || HandlerFun <- Results, HandlerFun /= no_match].
-
-do_apply(Func, Args, Opts) ->
-    Handle = couch_epi:get_handle(?SERVICE_ID),
-    couch_epi:apply(Handle, ?SERVICE_ID, Func, Args, Opts).
-
-select([], Default) ->
-    Default;
-select([{default, OverrideDefault}], _Default) ->
-    OverrideDefault;
-select(Handlers, _Default) ->
-    [Handler] = do_select(Handlers, []),
-    Handler.
-
-do_select([], Acc) ->
-    Acc;
-do_select([{override, Handler}|_], _Acc) ->
-    [Handler];
-do_select([{default, _}|Rest], Acc) ->
-    do_select(Rest, Acc);
-do_select([Handler], Acc) ->
-    [Handler | Acc];
-do_select([Handler | Rest], Acc) ->
-    do_select(Rest, [Handler | Acc]).
-
--ifdef(TEST).
--include_lib("eunit/include/eunit.hrl").
-
-select_override_test() ->
-    ?assertEqual(selected, select([{override, selected}, foo], default)),
-    ?assertEqual(selected, select([foo, {override, selected}], default)),
-    ?assertEqual(selected, select([{override, selected}, {override, bar}], default)),
-    ?assertError({badmatch,[bar, foo]}, select([foo, bar], default)).
-
-select_default_override_test() ->
-    ?assertEqual(selected, select([{default, new_default}, selected], old_default)),
-    ?assertEqual(selected, select([selected, {default, new_default}], old_default)),
-    ?assertEqual(selected, select([{default, selected}], old_default)),
-    ?assertEqual(selected, select([], selected)),
-    ?assertEqual(selected,
-        select([{default, new_default}, {override, selected}, bar], old_default)).
-
--endif.
+design_handler(HandlerKey) ->
+    Default = fun chttpd_db:bad_action_req/3,
+    couch_httpd_handlers:select(?SERVICE_ID, design_handler, HandlerKey, Default).
