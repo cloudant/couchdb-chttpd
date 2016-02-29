@@ -32,7 +32,7 @@
 -include_lib("couch/include/couch_db.hrl").
 -include_lib("couch_mrview/include/couch_mrview.hrl").
 
--import(chttpd,
+-import(couch_httpd,
     [send_json/2,send_json/3,send_method_not_allowed/2,
     send_chunk/2,start_chunked_response/3]).
 
@@ -59,7 +59,7 @@ handle_favicon_req(Req) ->
     handle_favicon_req(Req, config:get("chttpd", "docroot")).
 
 handle_favicon_req(#httpd{method='GET'}=Req, DocumentRoot) ->
-    chttpd:serve_file(Req, "favicon.ico", DocumentRoot);
+    couch_httpd:serve_file(Req, "favicon.ico", DocumentRoot);
 handle_favicon_req(Req, _) ->
     send_method_not_allowed(Req, "GET,HEAD").
 
@@ -67,18 +67,18 @@ handle_utils_dir_req(Req) ->
     handle_utils_dir_req(Req, config:get("chttpd", "docroot")).
 
 handle_utils_dir_req(#httpd{method='GET'}=Req, DocumentRoot) ->
-    "/" ++ UrlPath = chttpd:path(Req),
-    case chttpd:partition(UrlPath) of
+    "/" ++ UrlPath = couch_httpd:path(Req),
+    case couch_httpd:partition(UrlPath) of
     {_ActionKey, "/", RelativePath} ->
         % GET /_utils/path or GET /_utils/
         CachingHeaders = [{"Cache-Control", "private, must-revalidate"}],
         EnableCsp = config:get("csp", "enable", "false"),
         Headers = maybe_add_csp_headers(CachingHeaders, EnableCsp),
-        chttpd:serve_file(Req, RelativePath, DocumentRoot, Headers);
+        couch_httpd:serve_file(Req, RelativePath, DocumentRoot, Headers);
     {_ActionKey, "", _RelativePath} ->
         % GET /_utils
-        RedirectPath = chttpd:path(Req) ++ "/",
-        chttpd:send_redirect(Req, RedirectPath)
+        RedirectPath = couch_httpd:path(Req) ++ "/",
+        couch_httpd:send_redirect(Req, RedirectPath)
     end;
 handle_utils_dir_req(Req, _) ->
     send_method_not_allowed(Req, "GET,HEAD").
@@ -99,8 +99,8 @@ handle_all_dbs_req(#httpd{method='GET'}=Req) ->
     {ok, Info} = fabric:get_db_info(ShardDbName),
     Etag = couch_httpd:make_etag({Info}),
     Options = [{user_ctx, Req#httpd.user_ctx}],
-    {ok, Resp} = chttpd:etag_respond(Req, Etag, fun() ->
-        {ok, Resp} = chttpd:start_delayed_json_response(Req, 200, [{"Etag",Etag}]),
+    {ok, Resp} = couch_httpd:etag_respond(Req, Etag, fun() ->
+        {ok, Resp} = couch_httpd:start_delayed_json_response(Req, 200, [{"Etag",Etag}]),
         VAcc = #vacc{req=Req,resp=Resp},
         fabric:all_docs(ShardDbName, Options, fun all_dbs_callback/2, VAcc, Args)
     end),
@@ -112,22 +112,22 @@ handle_all_dbs_req(Req) ->
     send_method_not_allowed(Req, "GET,HEAD").
 
 all_dbs_callback({meta, _Meta}, #vacc{resp=Resp0}=Acc) ->
-    {ok, Resp1} = chttpd:send_delayed_chunk(Resp0, "["),
+    {ok, Resp1} = couch_httpd:send_delayed_chunk(Resp0, "["),
     {ok, Acc#vacc{resp=Resp1}};
 all_dbs_callback({row, Row}, #vacc{resp=Resp0}=Acc) ->
     Prepend = couch_mrview_http:prepend_val(Acc),
     case couch_util:get_value(id, Row) of <<"_design", _/binary>> ->
         {ok, Acc};
     DbName ->
-        {ok, Resp1} = chttpd:send_delayed_chunk(Resp0, [Prepend, ?JSON_ENCODE(DbName)]),
+        {ok, Resp1} = couch_httpd:send_delayed_chunk(Resp0, [Prepend, ?JSON_ENCODE(DbName)]),
         {ok, Acc#vacc{prepend=",", resp=Resp1}}
     end;
 all_dbs_callback(complete, #vacc{resp=Resp0}=Acc) ->
-    {ok, Resp1} = chttpd:send_delayed_chunk(Resp0, "]"),
-    {ok, Resp2} = chttpd:end_delayed_json_response(Resp1),
+    {ok, Resp1} = couch_httpd:send_delayed_chunk(Resp0, "]"),
+    {ok, Resp2} = couch_httpd:end_delayed_json_response(Resp1),
     {ok, Acc#vacc{resp=Resp2}};
 all_dbs_callback({error, Reason}, #vacc{resp=Resp0}=Acc) ->
-    {ok, Resp1} = chttpd:send_delayed_error(Resp0, Reason),
+    {ok, Resp1} = couch_httpd:send_delayed_error(Resp0, Reason),
     {ok, Acc#vacc{resp=Resp1}}.
 
 handle_task_status_req(#httpd{method='GET'}=Req) ->
@@ -140,7 +140,7 @@ handle_task_status_req(Req) ->
     send_method_not_allowed(Req, "GET,HEAD").
 
 handle_replicate_req(#httpd{method='POST', user_ctx=Ctx} = Req) ->
-    chttpd:validate_ctype(Req, "application/json"),
+    couch_httpd:validate_ctype(Req, "application/json"),
     %% see HACK in chttpd.erl about replication
     PostBody = get(post_body),
     case replicate(PostBody, Ctx) of
@@ -153,11 +153,11 @@ handle_replicate_req(#httpd{method='POST', user_ctx=Ctx} = Req) ->
         {ok, stopped} ->
             send_json(Req, 200, {[{ok, stopped}]});
         {error, not_found=Error} ->
-            chttpd:send_error(Req, Error);
+            couch_httpd:send_error(Req, Error);
         {error, {_, _}=Error} ->
-            chttpd:send_error(Req, Error);
+            couch_httpd:send_error(Req, Error);
         {_, _}=Error ->
-            chttpd:send_error(Req, Error)
+            couch_httpd:send_error(Req, Error)
     end;
 handle_replicate_req(Req) ->
     send_method_not_allowed(Req, "POST").
@@ -206,7 +206,7 @@ choose_node(Key) ->
     choose_node(term_to_binary(Key)).
 
 handle_reload_query_servers_req(#httpd{method='POST'}=Req) ->
-    chttpd:validate_ctype(Req, "application/json"),
+    couch_httpd:validate_ctype(Req, "application/json"),
     ok = couch_proc_manager:reload(),
     send_json(Req, 200, {[{ok, true}]});
 handle_reload_query_servers_req(Req) ->
@@ -245,8 +245,8 @@ handle_node_req(#httpd{path_parts=[_, _Node, <<"_config">>, _Section]}=Req) ->
 % PUT /_node/$node/_config/Section/Key
 % "value"
 handle_node_req(#httpd{method='PUT', path_parts=[_, Node, <<"_config">>, Section, Key]}=Req) ->
-    Value = chttpd:json_body(Req),
-    Persist = chttpd:header_value(Req, "X-Couch-Persist") /= "false",
+    Value = couch_httpd:json_body(Req),
+    Persist = couch_httpd:header_value(Req, "X-Couch-Persist") /= "false",
     OldValue = call_node(Node, config, get, [Section, Key, ""]),
     ok = call_node(Node, config, set, [Section, Key, ?b2l(Value), Persist]),
     send_json(Req, 200, list_to_binary(OldValue));
@@ -260,7 +260,7 @@ handle_node_req(#httpd{method='GET', path_parts=[_, Node, <<"_config">>, Section
     end;
 % DELETE /_node/$node/_config/Section/Key
 handle_node_req(#httpd{method='DELETE',path_parts=[_, Node, <<"_config">>, Section, Key]}=Req) ->
-    Persist = chttpd:header_value(Req, "X-Couch-Persist") /= "false",
+    Persist = couch_httpd:header_value(Req, "X-Couch-Persist") /= "false",
     case call_node(Node, config, get, [Section, Key, undefined]) of
     undefined ->
         throw({not_found, unknown_config_value});
@@ -271,7 +271,7 @@ handle_node_req(#httpd{method='DELETE',path_parts=[_, Node, <<"_config">>, Secti
 handle_node_req(#httpd{path_parts=[_, _Node, <<"_config">>, _Section, _Key]}=Req) ->
     send_method_not_allowed(Req, "GET,PUT,DELETE");
 handle_node_req(#httpd{path_parts=[_, _Node, <<"_config">>, _Section, _Key | _]}=Req) ->
-    chttpd:send_error(Req, not_found);
+    couch_httpd:send_error(Req, not_found);
 % GET /_node/$node/_stats
 handle_node_req(#httpd{method='GET', path_parts=[_, Node, <<"_stats">> | Path]}=Req) ->
     flush(Node, Req),
@@ -280,21 +280,21 @@ handle_node_req(#httpd{method='GET', path_parts=[_, Node, <<"_stats">> | Path]}=
     Nested = couch_stats_httpd:nest(Stats),
     EJSON0 = couch_stats_httpd:to_ejson(Nested),
     EJSON1 = couch_stats_httpd:extract_path(Path, EJSON0),
-    chttpd:send_json(Req, EJSON1);
+    couch_httpd:send_json(Req, EJSON1);
 handle_node_req(#httpd{path_parts=[_, _Node, <<"_stats">>]}=Req) ->
     send_method_not_allowed(Req, "GET");
 % GET /_node/$node/_system
 handle_node_req(#httpd{method='GET', path_parts=[_, Node, <<"_system">>]}=Req) ->
     Stats = call_node(Node, chttpd_misc, handle_system_req, [Req]),
-    chttpd:send_json(Req, Stats);
+    couch_httpd:send_json(Req, Stats);
 handle_node_req(#httpd{path_parts=[_, _Node, <<"_system">>]}=Req) ->
     send_method_not_allowed(Req, "GET");
 handle_node_req(#httpd{path_parts=[_]}=Req) ->
-    chttpd:send_error(Req, {bad_request, <<"Incomplete path to _node request">>});
+    couch_httpd:send_error(Req, {bad_request, <<"Incomplete path to _node request">>});
 handle_node_req(#httpd{path_parts=[_, _Node]}=Req) ->
-    chttpd:send_error(Req, {bad_request, <<"Incomplete path to _node request">>});
+    couch_httpd:send_error(Req, {bad_request, <<"Incomplete path to _node request">>});
 handle_node_req(Req) ->
-    chttpd:send_error(Req, not_found).
+    couch_httpd:send_error(Req, not_found).
 
 
 call_node(Node0, Mod, Fun, Args) when is_binary(Node0) ->
@@ -315,7 +315,7 @@ call_node(Node, Mod, Fun, Args) when is_atom(Node) ->
     end.
 
 flush(Node, Req) ->
-    case couch_util:get_value("flush", chttpd:qs(Req)) of
+    case couch_util:get_value("flush", couch_httpd:qs(Req)) of
         "true" ->
             call_node(Node, couch_stats_aggregator, flush, []);
         _Else ->

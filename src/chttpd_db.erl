@@ -20,11 +20,16 @@
     handle_design_info_req/3, handle_view_cleanup_req/2,
     update_doc/4, http_code_from_status/1]).
 
--import(chttpd,
+-export([
+    bad_action_req/3
+]).
+
+-import(couch_httpd,
     [send_json/2,send_json/3,send_json/4,send_method_not_allowed/2,
     start_json_response/2,send_chunk/2,end_json_response/1,
     start_chunked_response/3, absolute_uri/2, send/2,
     start_response_length/4]).
+
 
 -record(doc_query_args, {
     options = [],
@@ -59,7 +64,7 @@ handle_request(#httpd{path_parts=[DbName|RestParts],method=Method}=Req)->
     {'DELETE', []} ->
          % if we get ?rev=... the user is using a faulty script where the
          % document id is empty by accident. Let them recover safely.
-         case chttpd:qs_value(Req, "rev", false) of
+         case couch_httpd:qs_value(Req, "rev", false) of
              false -> delete_db_req(Req, DbName);
              _Rev -> throw({bad_request,
                  "You tried to DELETE a database with a ?=rev parameter. "
@@ -73,7 +78,7 @@ handle_request(#httpd{path_parts=[DbName|RestParts],method=Method}=Req)->
     end.
 
 handle_changes_req(#httpd{method='POST'}=Req, Db) ->
-    chttpd:validate_ctype(Req, "application/json"),
+    couch_httpd:validate_ctype(Req, "application/json"),
     handle_changes_req1(Req, Db);
 handle_changes_req(#httpd{method='GET'}=Req, Db) ->
     handle_changes_req1(Req, Db);
@@ -85,15 +90,15 @@ handle_changes_req1(#httpd{}=Req, Db) ->
     ChangesArgs = Args0#changes_args{
         filter_fun = couch_changes:configure_filter(Raw, Style, Req, Db)
     },
-    Max = chttpd:chunked_response_buffer_size(),
+    Max = couch_httpd:chunked_response_buffer_size(),
     case ChangesArgs#changes_args.feed of
     "normal" ->
         T0 = os:timestamp(),
         {ok, Info} = fabric:get_db_info(Db),
-        Etag = chttpd:make_etag(Info),
+        Etag = couch_httpd:make_etag(Info),
         DeltaT = timer:now_diff(os:timestamp(), T0) / 1000,
         couch_stats:update_histogram([couchdb, dbinfo], DeltaT),
-        chttpd:etag_respond(Req, Etag, fun() ->
+        couch_httpd:etag_respond(Req, Etag, fun() ->
             Acc0 = #cacc{
                 feed = normal,
                 etag = Etag,
@@ -121,7 +126,7 @@ handle_changes_req1(#httpd{}=Req, Db) ->
 
 % callbacks for continuous feed (newline-delimited JSON Objects)
 changes_callback(start, #cacc{feed = continuous} = Acc) ->
-    {ok, Resp} = chttpd:start_delayed_json_response(Acc#cacc.mochi, 200),
+    {ok, Resp} = couch_httpd:start_delayed_json_response(Acc#cacc.mochi, 200),
     {ok, Acc#cacc{mochi = Resp, responding = true}};
 changes_callback({change, Change}, #cacc{feed = continuous} = Acc) ->
     Data = [?JSON_ENCODE(Change) | "\n"],
@@ -134,8 +139,8 @@ changes_callback({stop, EndSeq, Pending}, #cacc{feed = continuous} = Acc) ->
         {<<"pending">>, Pending}
     ]},
     Data = [Buf, ?JSON_ENCODE(Row) | "\n"],
-    {ok, Resp1} = chttpd:send_delayed_chunk(Resp, Data),
-    chttpd:end_delayed_json_response(Resp1);
+    {ok, Resp1} = couch_httpd:send_delayed_chunk(Resp, Data),
+    couch_httpd:end_delayed_json_response(Resp1);
 
 % callbacks for eventsource feed (newline-delimited eventsource Objects)
 changes_callback(start, #cacc{feed = eventsource} = Acc) ->
@@ -144,7 +149,7 @@ changes_callback(start, #cacc{feed = eventsource} = Acc) ->
         {"Content-Type", "text/event-stream"},
         {"Cache-Control", "no-cache"}
     ],
-    {ok, Resp} = chttpd:start_delayed_json_response(Req, 200, Headers),
+    {ok, Resp} = couch_httpd:start_delayed_json_response(Req, 200, Headers),
     {ok, Acc#cacc{mochi = Resp, responding = true}};
 changes_callback({change, {ChangeProp}=Change}, #cacc{feed = eventsource} = Acc) ->
     Seq = proplists:get_value(seq, ChangeProp),
@@ -158,24 +163,24 @@ changes_callback({change, {ChangeProp}=Change}, #cacc{feed = eventsource} = Acc)
 changes_callback(timeout, #cacc{feed = eventsource} = Acc) ->
     #cacc{mochi = Resp} = Acc,
     Chunk = "event: heartbeat\ndata: \n\n",
-    {ok, Resp1} = chttpd:send_delayed_chunk(Resp, Chunk),
+    {ok, Resp1} = couch_httpd:send_delayed_chunk(Resp, Chunk),
     {ok, {"eventsource", Resp1}};
 changes_callback({stop, _EndSeq}, #cacc{feed = eventsource} = Acc) ->
     #cacc{mochi = Resp, buffer = Buf} = Acc,
-    {ok, Resp1} = chttpd:send_delayed_chunk(Resp, Buf),
-    chttpd:end_delayed_json_response(Resp1);
+    {ok, Resp1} = couch_httpd:send_delayed_chunk(Resp, Buf),
+    couch_httpd:end_delayed_json_response(Resp1);
 
 % callbacks for longpoll and normal (single JSON Object)
 changes_callback(start, #cacc{feed = normal} = Acc) ->
     #cacc{etag = Etag, mochi = Req} = Acc,
     FirstChunk = "{\"results\":[\n",
-    {ok, Resp} = chttpd:start_delayed_json_response(Req, 200,
+    {ok, Resp} = couch_httpd:start_delayed_json_response(Req, 200,
         [{"Etag",Etag}], FirstChunk),
     {ok, Acc#cacc{mochi = Resp, responding = true}};
 changes_callback(start, Acc) ->
     #cacc{mochi = Req} = Acc,
     FirstChunk = "{\"results\":[\n",
-    {ok, Resp} = chttpd:start_delayed_json_response(Req, 200, [], FirstChunk),
+    {ok, Resp} = couch_httpd:start_delayed_json_response(Req, 200, [], FirstChunk),
     {ok, Acc#cacc{mochi = Resp, responding = true}};
 changes_callback({change, Change}, Acc) ->
     Data = [Acc#cacc.prepend, ?JSON_ENCODE(Change)],
@@ -190,31 +195,31 @@ changes_callback({stop, EndSeq, Pending}, Acc) ->
         ?JSON_ENCODE(Pending),
         "}\n"
     ],
-    {ok, Resp1} = chttpd:close_delayed_json_object(Resp, Buf, Terminator, Max),
-    chttpd:end_delayed_json_response(Resp1);
+    {ok, Resp1} = couch_httpd:close_delayed_json_object(Resp, Buf, Terminator, Max),
+    couch_httpd:end_delayed_json_response(Resp1);
 
 changes_callback(waiting_for_updates, #cacc{buffer = []} = Acc) ->
     {ok, Acc};
 changes_callback(waiting_for_updates, Acc) ->
     #cacc{buffer = Buf, mochi = Resp} = Acc,
-    {ok, Resp1} = chttpd:send_delayed_chunk(Resp, Buf),
+    {ok, Resp1} = couch_httpd:send_delayed_chunk(Resp, Buf),
     {ok, Acc#cacc{buffer = [], bufsize = 0, mochi = Resp1}};
 changes_callback(timeout, Acc) ->
-    {ok, Resp1} = chttpd:send_delayed_chunk(Acc#cacc.mochi, "\n"),
+    {ok, Resp1} = couch_httpd:send_delayed_chunk(Acc#cacc.mochi, "\n"),
     {ok, Acc#cacc{mochi = Resp1}};
 changes_callback({error, Reason}, #cacc{mochi = #httpd{}} = Acc) ->
     #cacc{mochi = Req} = Acc,
-    chttpd:send_error(Req, Reason);
+    couch_httpd:send_error(Req, Reason);
 changes_callback({error, Reason}, #cacc{feed = normal, responding = false} = Acc) ->
     #cacc{mochi = Req} = Acc,
-    chttpd:send_error(Req, Reason);
+    couch_httpd:send_error(Req, Reason);
 changes_callback({error, Reason}, Acc) ->
-    chttpd:send_delayed_error(Acc#cacc.mochi, Reason).
+    couch_httpd:send_delayed_error(Acc#cacc.mochi, Reason).
 
 maybe_flush_changes_feed(#cacc{bufsize=Size, threshold=Max} = Acc, Data, Len)
          when Size > 0 andalso (Size + Len) > Max ->
     #cacc{buffer = Buffer, mochi = Resp} = Acc,
-    {ok, R1} = chttpd:send_delayed_chunk(Resp, Buffer),
+    {ok, R1} = couch_httpd:send_delayed_chunk(Resp, Buffer),
     {ok, Acc#cacc{prepend = ",\r\n", buffer = Data, bufsize=Len, mochi = R1}};
 maybe_flush_changes_feed(Acc0, Data, Len) ->
     #cacc{buffer = Buf, bufsize = Size} = Acc0,
@@ -234,12 +239,13 @@ handle_view_cleanup_req(Req, Db) ->
     send_json(Req, 202, {[{ok, true}]}).
 
 handle_design_req(#httpd{
-        path_parts=[_DbName, _Design, Name, <<"_",_/binary>> = Action | _Rest]
+        path_parts=[_DbName, _Design, Name, <<"_",_/binary>> = Action | _Rest],
+        stack = Stack
     }=Req, Db) ->
     DbName = mem3:dbname(Db#db.name),
     case ddoc_cache:open(DbName, <<"_design/", Name/binary>>) of
     {ok, DDoc} ->
-        Handler = chttpd_handlers:design_handler(Action, fun bad_action_req/3),
+        Handler = couch_httpd_handlers:design_handler(Action, Stack),
         Handler(Req, Db, DDoc);
     Error ->
         throw(Error)
@@ -264,9 +270,9 @@ handle_design_info_req(Req, _Db, _DDoc) ->
 
 create_db_req(#httpd{}=Req, DbName) ->
     couch_httpd:verify_is_server_admin(Req),
-    N = chttpd:qs_value(Req, "n", config:get("cluster", "n", "3")),
-    Q = chttpd:qs_value(Req, "q", config:get("cluster", "q", "8")),
-    P = chttpd:qs_value(Req, "placement", config:get("cluster", "placement")),
+    N = couch_httpd:qs_value(Req, "n", config:get("cluster", "n", "3")),
+    Q = couch_httpd:qs_value(Req, "q", config:get("cluster", "q", "8")),
+    P = couch_httpd:qs_value(Req, "placement", config:get("cluster", "placement")),
     DocUrl = absolute_uri(Req, "/" ++ couch_util:url_encode(DbName)),
     case fabric:create_db(DbName, [{n,N}, {q,Q}, {placement,P}]) of
     ok ->
@@ -274,7 +280,7 @@ create_db_req(#httpd{}=Req, DbName) ->
     accepted ->
         send_json(Req, 202, [{"Location", DocUrl}], {[{ok, true}]});
     {error, file_exists} ->
-        chttpd:send_error(Req, file_exists);
+        couch_httpd:send_error(Req, file_exists);
     Error ->
         throw(Error)
     end.
@@ -303,12 +309,12 @@ db_req(#httpd{method='GET',path_parts=[DbName]}=Req, _Db) ->
     send_json(Req, {DbInfo});
 
 db_req(#httpd{method='POST', path_parts=[DbName], user_ctx=Ctx}=Req, Db) ->
-    chttpd:validate_ctype(Req, "application/json"),
+    couch_httpd:validate_ctype(Req, "application/json"),
 
-    W = chttpd:qs_value(Req, "w", integer_to_list(mem3:quorum(Db))),
+    W = couch_httpd:qs_value(Req, "w", integer_to_list(mem3:quorum(Db))),
     Options = [{user_ctx,Ctx}, {w,W}],
 
-    Doc = couch_doc:from_json_obj(chttpd:json_body(Req)),
+    Doc = couch_doc:from_json_obj(couch_httpd:json_body(Req)),
     Doc2 = case Doc#doc.id of
         <<"">> ->
             Doc#doc{id=couch_uuids:new(), revs={0, []}};
@@ -316,7 +322,7 @@ db_req(#httpd{method='POST', path_parts=[DbName], user_ctx=Ctx}=Req, Db) ->
             Doc
     end,
     DocId = Doc2#doc.id,
-    case chttpd:qs_value(Req, "batch") of
+    case couch_httpd:qs_value(Req, "batch") of
     "ok" ->
         % async_batching
         spawn(fun() ->
@@ -353,7 +359,7 @@ db_req(#httpd{path_parts=[_DbName]}=Req, _Db) ->
     send_method_not_allowed(Req, "DELETE,GET,HEAD,POST");
 
 db_req(#httpd{method='POST',path_parts=[_,<<"_ensure_full_commit">>]}=Req, _Db) ->
-    chttpd:validate_ctype(Req, "application/json"),
+    couch_httpd:validate_ctype(Req, "application/json"),
     send_json(Req, 201, {[
         {ok, true},
         {instance_start_time, <<"0">>}
@@ -364,8 +370,8 @@ db_req(#httpd{path_parts=[_,<<"_ensure_full_commit">>]}=Req, _Db) ->
 
 db_req(#httpd{method='POST',path_parts=[_,<<"_bulk_docs">>], user_ctx=Ctx}=Req, Db) ->
     couch_stats:increment_counter([couchdb, httpd, bulk_requests]),
-    chttpd:validate_ctype(Req, "application/json"),
-    {JsonProps} = chttpd:json_body_obj(Req),
+    couch_httpd:validate_ctype(Req, "application/json"),
+    {JsonProps} = couch_httpd:json_body_obj(Req),
     DocsArray = case couch_util:get_value(<<"docs">>, JsonProps) of
     undefined ->
         throw({bad_request, <<"POST body must include `docs` parameter.">>});
@@ -379,9 +385,9 @@ db_req(#httpd{method='POST',path_parts=[_,<<"_bulk_docs">>], user_ctx=Ctx}=Req, 
     Value when is_integer(Value) ->
         integer_to_list(Value);
     _ ->
-        chttpd:qs_value(Req, "w", integer_to_list(mem3:quorum(Db)))
+        couch_httpd:qs_value(Req, "w", integer_to_list(mem3:quorum(Db)))
     end,
-    case chttpd:header_value(Req, "X-Couch-Full-Commit") of
+    case couch_httpd:header_value(Req, "X-Couch-Full-Commit") of
     "true" ->
         Options = [full_commit, {user_ctx,Ctx}, {w,W}];
     "false" ->
@@ -443,7 +449,7 @@ db_req(#httpd{path_parts=[_,<<"_bulk_docs">>]}=Req, _Db) ->
 db_req(#httpd{method='POST', path_parts=[_, <<"_bulk_get">>]}=Req, Db) ->
     couch_stats:increment_counter([couchdb, httpd, bulk_requests]),
     couch_httpd:validate_ctype(Req, "application/json"),
-    {JsonProps} = chttpd:json_body_obj(Req),
+    {JsonProps} = couch_httpd:json_body_obj(Req),
     case couch_util:get_value(<<"docs">>, JsonProps) of
         undefined ->
             throw({bad_request, <<"Missing JSON list of 'docs'.">>});
@@ -470,8 +476,8 @@ db_req(#httpd{path_parts=[_, <<"_bulk_get">>]}=Req, _Db) ->
 
 
 db_req(#httpd{method='POST',path_parts=[_,<<"_purge">>]}=Req, Db) ->
-    chttpd:validate_ctype(Req, "application/json"),
-    {IdsRevs} = chttpd:json_body_obj(Req),
+    couch_httpd:validate_ctype(Req, "application/json"),
+    {IdsRevs} = couch_httpd:json_body_obj(Req),
     IdsRevs2 = [{Id, couch_doc:parse_revs(Revs)} || {Id, Revs} <- IdsRevs],
     case fabric:purge_docs(Db, IdsRevs2) of
     {ok, PurgeSeq, PurgedIdsRevs} ->
@@ -489,7 +495,7 @@ db_req(#httpd{path_parts=[_,<<"_purge">>]}=Req, _Db) ->
     send_method_not_allowed(Req, "POST");
 
 db_req(#httpd{method='GET',path_parts=[_,OP]}=Req, Db) when ?IS_ALL_DOCS(OP) ->
-    case chttpd:qs_json_value(Req, "keys", nil) of
+    case couch_httpd:qs_json_value(Req, "keys", nil) of
     Keys when is_list(Keys) ->
         all_docs_view(Req, Db, Keys, OP);
     nil ->
@@ -499,8 +505,8 @@ db_req(#httpd{method='GET',path_parts=[_,OP]}=Req, Db) when ?IS_ALL_DOCS(OP) ->
     end;
 
 db_req(#httpd{method='POST',path_parts=[_,OP]}=Req, Db) when ?IS_ALL_DOCS(OP) ->
-    chttpd:validate_ctype(Req, "application/json"),
-    {Fields} = chttpd:json_body_obj(Req),
+    couch_httpd:validate_ctype(Req, "application/json"),
+    {Fields} = couch_httpd:json_body_obj(Req),
     case couch_util:get_value(<<"keys">>, Fields, nil) of
     Keys when is_list(Keys) ->
         all_docs_view(Req, Db, Keys, OP);
@@ -514,8 +520,8 @@ db_req(#httpd{path_parts=[_,OP]}=Req, _Db) when ?IS_ALL_DOCS(OP) ->
     send_method_not_allowed(Req, "GET,HEAD,POST");
 
 db_req(#httpd{method='POST',path_parts=[_,<<"_missing_revs">>]}=Req, Db) ->
-    chttpd:validate_ctype(Req, "application/json"),
-    {JsonDocIdRevs} = chttpd:json_body_obj(Req),
+    couch_httpd:validate_ctype(Req, "application/json"),
+    {JsonDocIdRevs} = couch_httpd:json_body_obj(Req),
     {ok, Results} = fabric:get_missing_revs(Db, JsonDocIdRevs),
     Results2 = [{Id, couch_doc:revs_to_strs(Revs)} || {Id, Revs, _} <- Results],
     send_json(Req, {[
@@ -526,8 +532,8 @@ db_req(#httpd{path_parts=[_,<<"_missing_revs">>]}=Req, _Db) ->
     send_method_not_allowed(Req, "POST");
 
 db_req(#httpd{method='POST',path_parts=[_,<<"_revs_diff">>]}=Req, Db) ->
-    chttpd:validate_ctype(Req, "application/json"),
-    {JsonDocIdRevs} = chttpd:json_body_obj(Req),
+    couch_httpd:validate_ctype(Req, "application/json"),
+    {JsonDocIdRevs} = couch_httpd:json_body_obj(Req),
     {ok, Results} = fabric:get_missing_revs(Db, JsonDocIdRevs),
     Results2 =
     lists:map(fun({Id, MissingRevs, PossibleAncestors}) ->
@@ -566,7 +572,7 @@ db_req(#httpd{path_parts=[_,<<"_security_mvcc">>]}=Req, _Db) ->
 
 db_req(#httpd{method='PUT',path_parts=[_,<<"_revs_limit">>],user_ctx=Ctx}=Req,
         Db) ->
-    Limit = chttpd:json_body(Req),
+    Limit = couch_httpd:json_body(Req),
     ok = fabric:set_revs_limit(Db, Limit, [{user_ctx,Ctx}]),
     send_json(Req, {[{<<"ok">>, true}]});
 
@@ -580,7 +586,7 @@ db_req(#httpd{path_parts=[_,<<"_revs_limit">>]}=Req, _Db) ->
 % as slashes in document IDs must otherwise be URL encoded.
 db_req(#httpd{method='GET', mochi_req=MochiReq, path_parts=[_DbName, <<"_design/", _/binary>> | _]}=Req, _Db) ->
     [Head | Tail] = re:split(MochiReq:get(raw_path), "_design%2F", [{return, list}, caseless]),
-    chttpd:send_redirect(Req, Head ++ "_design/" ++ Tail);
+    couch_httpd:send_redirect(Req, Head ++ "_design/" ++ Tail);
 
 db_req(#httpd{path_parts=[_DbName,<<"_design">>,Name]}=Req, Db) ->
     db_doc_req(Req, Db, <<"_design/",Name/binary>>);
@@ -616,7 +622,7 @@ all_docs_view(Req, Db, Keys, OP) ->
     Args2 = couch_mrview_util:validate_args(Args1),
     Args3 = set_namespace(OP, Args2),
     Options = [{user_ctx, Req#httpd.user_ctx}],
-    Max = chttpd:chunked_response_buffer_size(),
+    Max = couch_httpd:chunked_response_buffer_size(),
     VAcc = #vacc{db=Db, req=Req, threshold=Max},
     {ok, Resp} = fabric:all_docs(Db, Options, fun couch_mrview_http:view_cb/2, VAcc, Args3),
     {ok, Resp#vacc.resp}.
@@ -624,7 +630,7 @@ all_docs_view(Req, Db, Keys, OP) ->
 db_doc_req(#httpd{method='DELETE'}=Req, Db, DocId) ->
     % check for the existence of the doc to handle the 404 case.
     couch_doc_open(Db, DocId, nil, []),
-    case chttpd:qs_value(Req, "rev") of
+    case couch_httpd:qs_value(Req, "rev") of
     undefined ->
         Body = {[{<<"_deleted">>,true}]};
     Rev ->
@@ -653,7 +659,7 @@ db_doc_req(#httpd{method='GET', mochi_req=MochiReq}=Req, Db, DocId) ->
         {ok, Results} = fabric:open_revs(Db, DocId, Revs, Options),
         case Results of
             [] when Revs == all ->
-                chttpd:send_error(Req, {not_found, missing});
+                couch_httpd:send_error(Req, {not_found, missing});
             _Else ->
                 case MochiReq:accepts_content_type("multipart/mixed") of
                 false ->
@@ -687,9 +693,9 @@ db_doc_req(#httpd{method='GET', mochi_req=MochiReq}=Req, Db, DocId) ->
 db_doc_req(#httpd{method='POST', user_ctx=Ctx}=Req, Db, DocId) ->
     couch_httpd:validate_referer(Req),
     couch_doc:validate_docid(DocId),
-    chttpd:validate_ctype(Req, "multipart/form-data"),
+    couch_httpd:validate_ctype(Req, "multipart/form-data"),
 
-    W = chttpd:qs_value(Req, "w", integer_to_list(mem3:quorum(Db))),
+    W = couch_httpd:qs_value(Req, "w", integer_to_list(mem3:quorum(Db))),
     Options = [{user_ctx,Ctx}, {w,W}],
 
     Form = couch_httpd:parse_form(Req),
@@ -740,7 +746,7 @@ db_doc_req(#httpd{method='PUT', user_ctx=Ctx}=Req, Db, DocId) ->
     } = parse_doc_query(Req),
     couch_doc:validate_docid(DocId),
 
-    W = chttpd:qs_value(Req, "w", integer_to_list(mem3:quorum(Db))),
+    W = couch_httpd:qs_value(Req, "w", integer_to_list(mem3:quorum(Db))),
     Options = [{user_ctx,Ctx}, {w,W}],
 
     Loc = absolute_uri(Req, [$/, couch_util:url_encode(Db#db.name),
@@ -762,10 +768,10 @@ db_doc_req(#httpd{method='PUT', user_ctx=Ctx}=Req, Db, DocId) ->
             throw(Err)
         end;
     _Else ->
-        case chttpd:qs_value(Req, "batch") of
+        case couch_httpd:qs_value(Req, "batch") of
         "ok" ->
             % batch
-            Doc = couch_doc_from_req(Req, DocId, chttpd:json_body(Req)),
+            Doc = couch_doc_from_req(Req, DocId, couch_httpd:json_body(Req)),
 
             spawn(fun() ->
                     case catch(fabric:update_doc(Db, Doc, Options)) of
@@ -781,7 +787,7 @@ db_doc_req(#httpd{method='PUT', user_ctx=Ctx}=Req, Db, DocId) ->
             ]});
         _Normal ->
             % normal
-            Body = chttpd:json_body(Req),
+            Body = couch_httpd:json_body(Req),
             Doc = couch_doc_from_req(Req, DocId, Body),
             send_updated_doc(Req, Db, DocId, Doc, RespHeaders, UpdateType)
         end
@@ -789,7 +795,7 @@ db_doc_req(#httpd{method='PUT', user_ctx=Ctx}=Req, Db, DocId) ->
 
 db_doc_req(#httpd{method='COPY', user_ctx=Ctx}=Req, Db, SourceDocId) ->
     SourceRev =
-    case extract_header_rev(Req, chttpd:qs_value(Req, "rev")) of
+    case extract_header_rev(Req, couch_httpd:qs_value(Req, "rev")) of
         missing_rev -> nil;
         Rev -> Rev
     end,
@@ -820,7 +826,7 @@ send_doc(Req, Doc, Options) ->
     [] ->
         DiskEtag = couch_httpd:doc_etag(Doc),
         % output etag only when we have no meta
-        chttpd:etag_respond(Req, DiskEtag, fun() ->
+        couch_httpd:etag_respond(Req, DiskEtag, fun() ->
             send_doc_efficiently(Req, Doc, [{"Etag", DiskEtag}], Options)
         end);
     _ ->
@@ -891,17 +897,17 @@ send_docs_multipart(Req, Results, Options1) ->
     couch_httpd:last_chunk(Resp).
 
 receive_request_data(Req) ->
-    receive_request_data(Req, chttpd:body_length(Req)).
+    receive_request_data(Req, couch_httpd:body_length(Req)).
 
 receive_request_data(Req, LenLeft) when LenLeft > 0 ->
     Len = erlang:min(4096, LenLeft),
-    Data = chttpd:recv(Req, Len),
+    Data = couch_httpd:recv(Req, Len),
     {Data, fun() -> receive_request_data(Req, LenLeft - iolist_size(Data)) end};
 receive_request_data(_Req, _) ->
     throw(<<"expected more data">>).
 
 update_doc_result_to_json({{Id, Rev}, Error}) ->
-        {_Code, Err, Msg} = chttpd:error_info(Error),
+        {_Code, Err, Msg} = couch_httpd:error_info(Error),
         {[{id, Id}, {rev, couch_doc:rev_to_str(Rev)},
             {error, Err}, {reason, Msg}]}.
 
@@ -912,7 +918,7 @@ update_doc_result_to_json(DocId, {ok, NewRev}) ->
 update_doc_result_to_json(DocId, {accepted, NewRev}) ->
     {[{ok, true}, {id, DocId}, {rev, couch_doc:rev_to_str(NewRev)}, {accepted, true}]};
 update_doc_result_to_json(DocId, Error) ->
-    {_Code, ErrorStr, Reason} = chttpd:error_info(Error),
+    {_Code, ErrorStr, Reason} = couch_httpd:error_info(Error),
     {[{id, DocId}, {error, ErrorStr}, {reason, Reason}]}.
 
 
@@ -924,7 +930,7 @@ send_updated_doc(Req, Db, DocId, Doc, Headers) ->
 
 send_updated_doc(#httpd{user_ctx=Ctx} = Req, Db, DocId, #doc{deleted=Deleted}=Doc,
         Headers, UpdateType) ->
-    W = chttpd:qs_value(Req, "w", integer_to_list(mem3:quorum(Db))),
+    W = couch_httpd:qs_value(Req, "w", integer_to_list(mem3:quorum(Db))),
     Options =
         case couch_httpd:header_value(Req, "X-Couch-Full-Commit") of
         "true" ->
@@ -996,7 +1002,7 @@ update_doc(Db, DocId, #doc{deleted=Deleted}=Doc, Options) ->
 
 couch_doc_from_req(Req, DocId, #doc{revs=Revs} = Doc) ->
     validate_attachment_names(Doc),
-    Rev = case chttpd:qs_value(Req, "rev") of
+    Rev = case couch_httpd:qs_value(Req, "rev") of
     undefined ->
         undefined;
     QSRev ->
@@ -1069,7 +1075,7 @@ db_attachment_req(#httpd{method='GET',mochi_req=MochiReq}=Req, Db, DocId, FileNa
         Refs = monitor_attachments(Att),
         try
         Etag = case Md5 of
-            <<>> -> chttpd:doc_etag(Doc);
+            <<>> -> couch_httpd:doc_etag(Doc);
             _ -> "\"" ++ ?b2l(base64:encode(Md5)) ++ "\""
         end,
         ReqAcceptsAttEnc = lists:member(
@@ -1118,7 +1124,7 @@ db_attachment_req(#httpd{method='GET',mochi_req=MochiReq}=Req, Db, DocId, FileNa
         true ->
             fun couch_att:foldl/3
         end,
-        chttpd:etag_respond(
+        couch_httpd:etag_respond(
             Req,
             Etag,
             fun() ->
@@ -1174,7 +1180,7 @@ db_attachment_req(#httpd{method=Method, user_ctx=Ctx}=Req, Db, DocId, FileNamePa
                 undefined -> <<"application/octet-stream">>;
                 CType -> list_to_binary(CType)
             end,
-            Data = fabric:att_receiver(Req, chttpd:body_length(Req)),
+            Data = fabric:att_receiver(Req, couch_httpd:body_length(Req)),
             ContentLen = case couch_httpd:header_value(Req,"Content-Length") of
                 undefined -> undefined;
                 Length -> list_to_integer(Length)
@@ -1203,7 +1209,7 @@ db_attachment_req(#httpd{method=Method, user_ctx=Ctx}=Req, Db, DocId, FileNamePa
             ])]
     end,
 
-    Doc = case extract_header_rev(Req, chttpd:qs_value(Req, "rev")) of
+    Doc = case extract_header_rev(Req, couch_httpd:qs_value(Req, "rev")) of
         missing_rev -> % make the new doc
             couch_doc:validate_docid(DocId),
             #doc{id=DocId};
@@ -1310,7 +1316,7 @@ get_md5_header(Req) ->
     end.
 
 parse_doc_query(Req) ->
-    lists:foldl(fun parse_doc_query/2, #doc_query_args{}, chttpd:qs(Req)).
+    lists:foldl(fun parse_doc_query/2, #doc_query_args{}, couch_httpd:qs(Req)).
 
 parse_doc_query({Key, Value}, Args) ->
     case {Key, Value} of
@@ -1418,7 +1424,7 @@ parse_changes_query(Req) ->
         _Else -> % unknown key value pair, ignore.
             Args
         end
-    end, #changes_args{}, chttpd:qs(Req)),
+    end, #changes_args{}, couch_httpd:qs(Req)),
     %% if it's an EventSource request with a Last-event-ID header
     %% that should override the `since` query string, since it's
     %% probably the browser reconnecting.
@@ -1437,7 +1443,7 @@ parse_changes_query(Req) ->
 extract_header_rev(Req, ExplicitRev) when is_binary(ExplicitRev) or is_list(ExplicitRev)->
     extract_header_rev(Req, couch_doc:parse_rev(ExplicitRev));
 extract_header_rev(Req, ExplicitRev) ->
-    Etag = case chttpd:header_value(Req, "If-Match") of
+    Etag = case couch_httpd:header_value(Req, "If-Match") of
         undefined -> undefined;
         Value -> couch_doc:parse_rev(string:strip(Value, both, $"))
     end,
@@ -1495,7 +1501,7 @@ put_security(#httpd{user_ctx=Ctx}=Req, Db, FetchRev) ->
         {true, true} ->
             DbName = Db#db.name,
             DocId = cassim_metadata_cache:security_meta_id(DbName),
-            {SecObj0} = chttpd:json_body(Req),
+            {SecObj0} = couch_httpd:json_body(Req),
             {OldSecDoc} = cassim:get_security(DbName),
             OldRev = couch_util:get_value(<<"_rev">>, OldSecDoc, undefined),
             %% Maybe update the security doc with the rev when hiding mvcc logic
@@ -1527,7 +1533,7 @@ put_security(#httpd{user_ctx=Ctx}=Req, Db, FetchRev) ->
         %% handle completely disabled case and also cassim setting enabled but
         %% metadata db does not exist.
         _ ->
-            SecObj = chttpd:json_body(Req),
+            SecObj = couch_httpd:json_body(Req),
             case fabric:set_security(Db, SecObj, [{user_ctx, Ctx}]) of
                 ok ->
                     send_json(Req, {[{<<"ok">>, true}]});
@@ -1552,7 +1558,7 @@ bulk_get_parse_doc_query(Req) ->
     lists:foldl(fun({Key, Value}, Args) ->
         ok = validate_query_param(Key),
         parse_doc_query({Key, Value}, Args)
-    end, #doc_query_args{}, chttpd:qs(Req)).
+    end, #doc_query_args{}, couch_httpd:qs(Req)).
 
 
 validate_query_param("open_revs"=Key) ->

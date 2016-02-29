@@ -19,7 +19,6 @@
 
 
 setup() ->
-    mock(chttpd),
     mock(couch_epi),
     mock(couch_httpd),
     mock(couch_stats),
@@ -31,12 +30,11 @@ setup() ->
 
 teardown(Pid) ->
     ok = stop_accumulator(Pid),
-    meck:unload(chttpd),
-    meck:unload(couch_epi),
-    meck:unload(couch_httpd),
-    meck:unload(couch_stats),
-    meck:unload(fabric),
-    meck:unload(mochireq).
+    catch (meck:unload(couch_epi)),
+    catch (meck:unload(couch_httpd)),
+    catch (meck:unload(couch_stats)),
+    catch (meck:unload(fabric)),
+    catch (meck:unload(mochireq)).
 
 
 bulk_get_test_() ->
@@ -69,7 +67,7 @@ should_not_accept_specific_query_params(_) ->
     lists:map(fun (Param) ->
         {Param, ?_assertThrow({bad_request, _},
                               begin
-                                  ok = meck:expect(chttpd, qs,
+                                  ok = meck:expect(couch_httpd, qs,
                                                    fun(_) -> [{Param, ""}] end),
                                   chttpd_db:db_req(Req, nil)
                               end)}
@@ -247,13 +245,10 @@ mock(mochireq) ->
 mock(couch_httpd) ->
     ok = meck:new(couch_httpd, [passthrough]),
     ok = meck:expect(couch_httpd, validate_ctype, fun(_, _) -> ok end),
-    ok;
-mock(chttpd) ->
-    ok = meck:new(chttpd, [passthrough]),
-    ok = meck:expect(chttpd, start_json_response, fun(_, _) -> {ok, nil} end),
-    ok = meck:expect(chttpd, end_json_response, fun(_) -> ok end),
-    ok = meck:expect(chttpd, send_chunk, fun send_chunk/2),
-    ok = meck:expect(chttpd, json_body_obj, fun (#httpd{req_body=Body}) -> Body end),
+    ok = meck:expect(couch_httpd, start_json_response, fun(_, _) -> {ok, nil} end),
+    ok = meck:expect(couch_httpd, end_json_response, fun(_) -> ok end),
+    ok = meck:expect(couch_httpd, send_chunk, fun send_chunk/2),
+    ok = meck:expect(couch_httpd, json_body_obj, fun (#httpd{req_body=Body}) -> Body end),
     ok;
 mock(couch_epi) ->
     ok = meck:new(couch_epi, [passthrough]),

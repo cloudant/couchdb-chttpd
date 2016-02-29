@@ -62,7 +62,7 @@ handle_doc_show_req(#httpd{
     handle_doc_show(Req, Db, DDoc, ShowName, nil);
 
 handle_doc_show_req(Req, _Db, _DDoc) ->
-    chttpd:send_error(Req, 404, <<"show_error">>, <<"Invalid path.">>).
+    couch_httpd:send_error(Req, 404, <<"show_error">>, <<"Invalid path.">>).
 
 handle_doc_show(Req, Db, DDoc, ShowName, Doc) ->
     handle_doc_show(Req, Db, DDoc, ShowName, Doc, null).
@@ -72,22 +72,22 @@ handle_doc_show(Req, Db, DDoc, ShowName, Doc, DocId) ->
     couch_util:get_nested_json_value(DDoc#doc.body, [<<"shows">>, ShowName]),
     % get responder for ddoc/showname
     CurrentEtag = show_etag(Req, Doc, DDoc, []),
-    chttpd:etag_respond(Req, CurrentEtag, fun() ->
-        JsonReq = chttpd_external:json_req_obj(Req, Db, DocId),
+    couch_httpd:etag_respond(Req, CurrentEtag, fun() ->
+        JsonReq = couch_httpd_external:json_req_obj(Req, Db, DocId),
         JsonDoc = couch_query_servers:json_doc(Doc),
         [<<"resp">>, ExternalResp] =
             couch_query_servers:ddoc_prompt(DDoc, [<<"shows">>, ShowName],
                 [JsonDoc, JsonReq]),
         JsonResp = apply_etag(ExternalResp, CurrentEtag),
-        chttpd_external:send_external_response(Req, JsonResp)
+        couch_httpd_external:send_external_response(Req, JsonResp)
     end).
 
 
 show_etag(#httpd{user_ctx=UserCtx}=Req, Doc, DDoc, More) ->
-    Accept = chttpd:header_value(Req, "Accept"),
+    Accept = couch_httpd:header_value(Req, "Accept"),
     DocPart = case Doc of
         nil -> nil;
-        Doc -> chttpd:doc_etag(Doc)
+        Doc -> couch_httpd:doc_etag(Doc)
     end,
     couch_httpd:make_etag({couch_httpd:doc_etag(DDoc), DocPart, Accept,
         UserCtx#user_ctx.roles, More}).
@@ -111,19 +111,19 @@ handle_doc_update_req(#httpd{
     send_doc_update_response(Req, Db, DDoc, UpdateName, Doc, DocId);
 
 handle_doc_update_req(Req, _Db, _DDoc) ->
-    chttpd:send_error(Req, 404, <<"update_error">>, <<"Invalid path.">>).
+    couch_httpd:send_error(Req, 404, <<"update_error">>, <<"Invalid path.">>).
 
 send_doc_update_response(Req, Db, DDoc, UpdateName, Doc, DocId) ->
     %% Will throw an exception if the _update handler is missing
     couch_util:get_nested_json_value(DDoc#doc.body, [<<"updates">>, UpdateName]),
-    JsonReq = chttpd_external:json_req_obj(Req, Db, DocId),
+    JsonReq = couch_httpd_external:json_req_obj(Req, Db, DocId),
     JsonDoc = couch_query_servers:json_doc(Doc),
     Cmd = [<<"updates">>, UpdateName],
-    W = chttpd:qs_value(Req, "w", integer_to_list(mem3:quorum(Db))),
+    W = couch_httpd:qs_value(Req, "w", integer_to_list(mem3:quorum(Db))),
     UpdateResp = couch_query_servers:ddoc_prompt(DDoc, Cmd, [JsonDoc, JsonReq]),
     JsonResp = case UpdateResp of
         [<<"up">>, {NewJsonDoc}, {JsonResp0}] ->
-            case chttpd:header_value(Req, "X-Couch-Full-Commit", "false") of
+            case couch_httpd:header_value(Req, "X-Couch-Full-Commit", "false") of
             "true" ->
                 Options = [full_commit, {user_ctx, Req#httpd.user_ctx}, {w, W}];
             _ ->
@@ -150,31 +150,31 @@ send_doc_update_response(Req, Db, DDoc, UpdateName, Doc, DocId) ->
             {[{<<"code">>, 200} | JsonResp0]}
     end,
     % todo set location field
-    chttpd_external:send_external_response(Req, JsonResp).
+    couch_httpd_external:send_external_response(Req, JsonResp).
 
 
 % view-list request with view and list from same design doc.
 handle_view_list_req(#httpd{method=Method,
         path_parts=[_, _, DesignName, _, ListName, ViewName]}=Req, Db, DDoc)
         when Method =:= 'GET' orelse Method =:= 'OPTIONS' ->
-    Keys = chttpd:qs_json_value(Req, "keys", undefined),
+    Keys = couch_httpd:qs_json_value(Req, "keys", undefined),
     handle_view_list(Req, Db, DDoc, ListName, {DesignName, ViewName}, Keys);
 
 % view-list request with view and list from different design docs.
 handle_view_list_req(#httpd{method=Method,
         path_parts=[_, _, _, _, ListName, DesignName, ViewName]}=Req, Db, DDoc)
         when Method =:= 'GET' orelse Method =:= 'OPTIONS' ->
-    Keys = chttpd:qs_json_value(Req, "keys", undefined),
+    Keys = couch_httpd:qs_json_value(Req, "keys", undefined),
     handle_view_list(Req, Db, DDoc, ListName, {DesignName, ViewName}, Keys);
 
 handle_view_list_req(#httpd{method=Method}=Req, _Db, _DDoc)
         when Method =:= 'GET' orelse Method =:= 'OPTIONS' ->
-    chttpd:send_error(Req, 404, <<"list_error">>, <<"Invalid path.">>);
+    couch_httpd:send_error(Req, 404, <<"list_error">>, <<"Invalid path.">>);
 
 handle_view_list_req(#httpd{method='POST',
         path_parts=[_, _, DesignName, _, ListName, ViewName]}=Req, Db, DDoc) ->
-    chttpd:validate_ctype(Req, "application/json"),
-    ReqBody = chttpd:body(Req),
+    couch_httpd:validate_ctype(Req, "application/json"),
+    ReqBody = couch_httpd:body(Req),
     {Props2} = ?JSON_DECODE(ReqBody),
     Keys = proplists:get_value(<<"keys">>, Props2, undefined),
     handle_view_list(Req#httpd{req_body=ReqBody}, Db, DDoc, ListName,
@@ -182,18 +182,18 @@ handle_view_list_req(#httpd{method='POST',
 
 handle_view_list_req(#httpd{method='POST',
         path_parts=[_, _, _, _, ListName, DesignName, ViewName]}=Req, Db, DDoc) ->
-    chttpd:validate_ctype(Req, "application/json"),
-    ReqBody = chttpd:body(Req),
+    couch_httpd:validate_ctype(Req, "application/json"),
+    ReqBody = couch_httpd:body(Req),
     {Props2} = ?JSON_DECODE(ReqBody),
     Keys = proplists:get_value(<<"keys">>, Props2, undefined),
     handle_view_list(Req#httpd{req_body=ReqBody}, Db, DDoc, ListName,
         {DesignName, ViewName}, Keys);
 
 handle_view_list_req(#httpd{method='POST'}=Req, _Db, _DDoc) ->
-    chttpd:send_error(Req, 404, <<"list_error">>, <<"Invalid path.">>);
+    couch_httpd:send_error(Req, 404, <<"list_error">>, <<"Invalid path.">>);
 
 handle_view_list_req(Req, _Db, _DDoc) ->
-    chttpd:send_method_not_allowed(Req, "GET,POST,HEAD").
+    couch_httpd:send_method_not_allowed(Req, "GET,POST,HEAD").
 
 handle_view_list(Req, Db, DDoc, LName, {ViewDesignName, ViewName}, Keys) ->
     %% Will throw an exception if the _list handler is missing
@@ -203,7 +203,7 @@ handle_view_list(Req, Db, DDoc, LName, {ViewDesignName, ViewName}, Keys) ->
     Etag = couch_uuids:new(),
     QueryArgs = couch_mrview_http:parse_params(Req, Keys),
     Options = [{user_ctx, Req#httpd.user_ctx}],
-    chttpd:etag_respond(Req, Etag, fun() ->
+    couch_httpd:etag_respond(Req, Etag, fun() ->
         couch_query_servers:with_ddoc_proc(DDoc, fun(QServer) ->
             Acc = #lacc{
                 lname = LName,

@@ -26,20 +26,20 @@ multi_query_view(Req, Db, DDoc, ViewName, Queries) ->
     end, Queries),
     VAcc0 = #vacc{db=Db, req=Req, prepend="\r\n"},
     FirstChunk = "{\"results\":[",
-    {ok, Resp0} = chttpd:start_delayed_json_response(VAcc0#vacc.req, 200, [], FirstChunk),
+    {ok, Resp0} = couch_httpd:start_delayed_json_response(VAcc0#vacc.req, 200, [], FirstChunk),
     VAcc1 = VAcc0#vacc{resp=Resp0},
     VAcc2 = lists:foldl(fun(Args, Acc0) ->
         {ok, Acc1} = fabric:query_view(Db, DDoc, ViewName, fun couch_mrview_http:view_cb/2, Acc0, Args),
         Acc1
     end, VAcc1, ArgQueries),
-    {ok, Resp1} = chttpd:send_delayed_chunk(VAcc2#vacc.resp, "\r\n]}"),
-    {ok, Resp2} = chttpd:end_delayed_json_response(Resp1),
+    {ok, Resp1} = couch_httpd:send_delayed_chunk(VAcc2#vacc.resp, "\r\n]}"),
+    {ok, Resp2} = couch_httpd:end_delayed_json_response(Resp1),
     {ok, Resp2#vacc.resp}.
 
 
 design_doc_view(Req, Db, DDoc, ViewName, Keys) ->
     Args = couch_mrview_http:parse_params(Req, Keys),
-    Max = chttpd:chunked_response_buffer_size(),
+    Max = couch_httpd:chunked_response_buffer_size(),
     VAcc = #vacc{db=Db, req=Req, threshold=Max},
     {ok, Resp} = fabric:query_view(Db, DDoc, ViewName, fun couch_mrview_http:view_cb/2, VAcc, Args),
     {ok, Resp#vacc.resp}.
@@ -47,12 +47,12 @@ design_doc_view(Req, Db, DDoc, ViewName, Keys) ->
 handle_view_req(#httpd{method='GET',
         path_parts=[_, _, _, _, ViewName]}=Req, Db, DDoc) ->
     couch_stats:increment_counter([couchdb, httpd, view_reads]),
-    Keys = chttpd:qs_json_value(Req, "keys", undefined),
+    Keys = couch_httpd:qs_json_value(Req, "keys", undefined),
     design_doc_view(Req, Db, DDoc, ViewName, Keys);
 
 handle_view_req(#httpd{method='POST',
         path_parts=[_, _, _, _, ViewName]}=Req, Db, DDoc) ->
-    chttpd:validate_ctype(Req, "application/json"),
+    couch_httpd:validate_ctype(Req, "application/json"),
     Props = couch_httpd:json_body_obj(Req),
     Keys = couch_mrview_util:get_view_keys(Props),
     Queries = couch_mrview_util:get_view_queries(Props),
@@ -73,8 +73,8 @@ handle_view_req(#httpd{method='POST',
     end;
 
 handle_view_req(Req, _Db, _DDoc) ->
-    chttpd:send_method_not_allowed(Req, "GET,POST,HEAD").
+    couch_httpd:send_method_not_allowed(Req, "GET,POST,HEAD").
 
 handle_temp_view_req(Req, _Db) ->
     Msg = <<"Temporary views are not supported in CouchDB">>,
-    chttpd:send_error(Req, 403, forbidden, Msg).
+    couch_httpd:send_error(Req, 403, forbidden, Msg).
