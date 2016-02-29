@@ -18,7 +18,7 @@
 
 setup() ->
     Addr = config:get("chttpd", "bind_address", "127.0.0.1"),
-    Port = mochiweb_socket_server:get(chttpd, port),
+    Port = couch_httpd:port(clustered_http),
     BaseUrl = lists:concat(["http://", Addr, ":", Port]),
     BaseUrl.
 

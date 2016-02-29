@@ -24,7 +24,7 @@ setup() ->
     ok = config:set("admins", ?USER, ?PASS, _Persist=false),
     TmpDb = ?tempdb(),
     Addr = config:get("chttpd", "bind_address", "127.0.0.1"),
-    Port = mochiweb_socket_server:get(chttpd, port),
+    Port = couch_httpd:port(clustered_http),
     Url = lists:concat(["http://", Addr, ":", Port, "/", ?b2l(TmpDb)]),
     create_db(Url),
     Url.
