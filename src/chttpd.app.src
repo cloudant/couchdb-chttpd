@@ -39,6 +39,7 @@
         couch_stats,
         config,
         couch,
+        couch_httpd,
         ets_lru,
         fabric,
         cassim
