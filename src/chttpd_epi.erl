@@ -36,7 +36,6 @@ providers() ->
 
 services() ->
     [
-        {chttpd_auth, chttpd_auth},
         {http_clustered_handlers, chttpd_http_handlers_plugin},
         {chttpd, chttpd_plugin}
     ].
