@@ -36,8 +36,7 @@ providers() ->
 
 services() ->
     [
-        {http_clustered_handlers, chttpd_http_handlers_plugin},
-        {chttpd, chttpd_plugin}
+        {http_clustered_handlers, chttpd_http_handlers_plugin}
     ].
 
 data_subscriptions() ->
