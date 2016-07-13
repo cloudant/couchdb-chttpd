@@ -13,6 +13,7 @@
 -module(chttpd_view).
 -include_lib("couch/include/couch_db.hrl").
 -include_lib("couch_mrview/include/couch_mrview.hrl").
+-include("chttpd.hrl").
 
 -export([handle_view_req/3, handle_temp_view_req/2]).
 
@@ -30,7 +31,7 @@ multi_query_view(Req, Db, DDoc, ViewName, Queries) ->
     {ok, Resp0} = chttpd:start_delayed_json_response(VAcc0#vacc.req, 200, [], FirstChunk),
     VAcc1 = VAcc0#vacc{resp=Resp0},
     VAcc2 = lists:foldl(fun(Args, Acc0) ->
-        {ok, Acc1} = fabric:query_view(Db, DDoc, ViewName, fun couch_mrview_http:view_cb/2, Acc0, Args),
+        {ok, Acc1} = ?API_MOD:query_view(Db, DDoc, ViewName, fun couch_mrview_http:view_cb/2, Acc0, Args),
         Acc1
     end, VAcc1, ArgQueries),
     {ok, Resp1} = chttpd:send_delayed_chunk(VAcc2#vacc.resp, "\r\n]}"),
@@ -41,7 +42,7 @@ design_doc_view(Req, Db, DDoc, ViewName, Keys) ->
     Args = couch_mrview_http:parse_params(Req, Keys),
     Max = chttpd:chunked_response_buffer_size(),
     VAcc = #vacc{db=Db, req=Req, threshold=Max},
-    {ok, Resp} = fabric:query_view(Db, DDoc, ViewName, fun couch_mrview_http:view_cb/2, VAcc, Args),
+    {ok, Resp} = ?API_MOD:query_view(Db, DDoc, ViewName, fun couch_mrview_http:view_cb/2, VAcc, Args),
     {ok, Resp#vacc.resp}.
 
 handle_view_req(#httpd{method='GET',

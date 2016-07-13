@@ -16,14 +16,15 @@
 
 -include_lib("couch/include/couch_db.hrl").
 -include_lib("couch_mrview/include/couch_mrview.hrl").
+-include("chttpd.hrl").
 
 % /db/_design/foo/_show/bar/docid
 % show converts a json doc to a response of any content-type.
 % it looks up the doc an then passes it to the query server.
 % then it sends the response from the query server to the http client.
 
-maybe_open_doc(Db, DocId) ->
-    case fabric:open_doc(Db, DocId, [conflicts]) of
+maybe_open_doc(Req, Db, DocId) ->
+    case ?API_MOD:open_doc(Db, DocId, [conflicts]) of
     {ok, Doc} ->
         Doc;
     {not_found, _} ->
@@ -35,7 +36,7 @@ handle_doc_show_req(#httpd{
     }=Req, Db, DDoc) ->
 
     % open the doc
-    Doc = maybe_open_doc(Db, DocId),
+    Doc = maybe_open_doc(Req, Db, DocId),
 
     % we don't handle revs here b/c they are an internal api
     % returns 404 if there is no doc with DocId
@@ -49,7 +50,7 @@ handle_doc_show_req(#httpd{
     DocId1 = ?l2b(string:join([?b2l(P)|| P <- DocParts], "/")),
 
     % open the doc
-    Doc = maybe_open_doc(Db, DocId1),
+    Doc = maybe_open_doc(Req, Db, DocId1),
 
     % we don't handle revs here b/c they are an internal api
     % pass 404 docs to the show function
@@ -107,7 +108,7 @@ handle_doc_update_req(#httpd{
         path_parts=[_, _, _, _, UpdateName | DocIdParts]
     }=Req, Db, DDoc) ->
     DocId = ?l2b(string:join([?b2l(P) || P <- DocIdParts], "/")),
-    Doc = maybe_open_doc(Db, DocId),
+    Doc = maybe_open_doc(Req, Db, DocId),
     send_doc_update_response(Req, Db, DDoc, UpdateName, Doc, DocId);
 
 handle_doc_update_req(Req, _Db, _DDoc) ->
@@ -119,7 +120,7 @@ send_doc_update_response(Req, Db, DDoc, UpdateName, Doc, DocId) ->
     JsonReq = chttpd_external:json_req_obj(Req, Db, DocId),
     JsonDoc = couch_query_servers:json_doc(Doc),
     Cmd = [<<"updates">>, UpdateName],
-    W = chttpd:qs_value(Req, "w", integer_to_list(mem3:quorum(Db))),
+    W = chttpd:get_w(Req, Db),
     UpdateResp = couch_query_servers:ddoc_prompt(DDoc, Cmd, [JsonDoc, JsonReq]),
     JsonResp = case UpdateResp of
         [<<"up">>, {NewJsonDoc}, {JsonResp0}] ->
@@ -131,7 +132,7 @@ send_doc_update_response(Req, Db, DDoc, UpdateName, Doc, DocId) ->
             end,
             NewDoc = couch_doc:from_json_obj({NewJsonDoc}),
             couch_doc:validate_docid(NewDoc#doc.id),
-            {UpdateResult, NewRev} = fabric:update_doc(Db, NewDoc, Options),
+            {UpdateResult, NewRev} = ?API_MOD:update_doc(Db, NewDoc, Options),
             NewRevStr = couch_doc:rev_to_str(NewRev),
             case {UpdateResult, NewRev} of
             {ok, _} ->
@@ -214,9 +215,9 @@ handle_view_list(Req, Db, DDoc, LName, {ViewDesignName, ViewName}, Keys) ->
             },
             case ViewName of
                 <<"_all_docs">> ->
-                    fabric:all_docs(Db, Options, CB, Acc, QueryArgs);
+                    ?API_MOD:all_docs(Db, Options, CB, Acc, QueryArgs);
                 _ ->
-                    fabric:query_view(Db, VDoc, ViewName, CB, Acc, QueryArgs)
+                    ?API_MOD:query_view(Db, VDoc, ViewName, CB, Acc, QueryArgs)
             end
         end)
     end).

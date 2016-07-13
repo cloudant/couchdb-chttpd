@@ -26,3 +26,5 @@
     (C >= $a andalso C =< $f) orelse
     (C >= $A andalso C =< $F)
 )).
+
+-define(API_MOD, (Req#httpd.api_module)).

@@ -20,6 +20,7 @@
 -import(chttpd,[send_error/4]).
 
 -include_lib("couch/include/couch_db.hrl").
+-include("chttpd.hrl").
 
 % handle_external_req/2
 % for the old type of config usage:
@@ -71,8 +72,8 @@ json_req_obj_fields() ->
      <<"path">>, <<"raw_path">>, <<"query">>, <<"headers">>, <<"body">>,
      <<"peer">>, <<"form">>, <<"cookie">>, <<"userCtx">>, <<"secObj">>].
 
-json_req_obj_field(<<"info">>, #httpd{}, Db, _DocId) ->
-    {ok, Info} = get_db_info(Db),
+json_req_obj_field(<<"info">>, #httpd{} = Req, Db, _DocId) ->
+    {ok, Info} = get_db_info(Req, Db),
     {Info};
 json_req_obj_field(<<"uuid">>, #httpd{}, _Db, _DocId) ->
     couch_uuids:new();
@@ -112,19 +113,19 @@ json_req_obj_field(<<"cookie">>, #httpd{mochi_req=Req}, _Db, _DocId) ->
     to_json_terms(Req:parse_cookie());
 json_req_obj_field(<<"userCtx">>, #httpd{}, Db, _DocId) ->
     couch_util:json_user_ctx(Db);
-json_req_obj_field(<<"secObj">>, #httpd{user_ctx=UserCtx}, Db, _DocId) ->
-    get_db_security(Db, UserCtx).
+json_req_obj_field(<<"secObj">>, #httpd{user_ctx=UserCtx} = Req, Db, _DocId) ->
+    get_db_security(Req, Db, UserCtx).
 
 
-get_db_info(#db{main_pid = nil} = Db) ->
-    fabric:get_db_info(Db);
-get_db_info(#db{} = Db) ->
+get_db_info(Req, #db{main_pid = nil} = Db) ->
+    ?API_MOD:get_db_info(Db);
+get_db_info(_Req, #db{} = Db) ->
     couch_db:get_db_info(Db).
 
 
-get_db_security(#db{main_pid = nil}=Db, #user_ctx{}) ->
-    fabric:get_security(Db);
-get_db_security(#db{}=Db, #user_ctx{}) ->
+get_db_security(Req, #db{main_pid = nil}=Db, #user_ctx{}) ->
+    ?API_MOD:get_security(Db);
+get_db_security(_Req, #db{}=Db, #user_ctx{}) ->
     couch_db:get_security(Db).
 
 

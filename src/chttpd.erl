@@ -28,7 +28,8 @@
     send_response_no_cors/4,
     send_method_not_allowed/2, send_error/2, send_error/4, send_redirect/2,
     send_chunked_error/2, send_json/2,send_json/3,send_json/4,
-    validate_ctype/2]).
+    validate_ctype/2,
+    get_w/2]).
 
 -export([authenticate_request/3]).
 
@@ -214,7 +215,8 @@ handle_request_int(MochiReq) ->
         path_parts = [list_to_binary(chttpd:unquote(Part))
                 || Part <- string:tokens(Path, "/")],
         requested_path_parts = [?l2b(unquote(Part))
-                || Part <- string:tokens(RequestedPath, "/")]
+                || Part <- string:tokens(RequestedPath, "/")],
+        api_module = fabric
     },
 
     % put small token on heap to keep requests synced to backend calls
@@ -618,6 +620,12 @@ body(#httpd{mochi_req=MochiReq, req_body=ReqBody}) ->
 
 validate_ctype(Req, Ctype) ->
     couch_httpd:validate_ctype(Req, Ctype).
+
+
+get_w(Req, Db) ->
+    Default = integer_to_list(mem3:quorum(mem3:dbname(Db#db.name))),
+    chttpd:qs_value(Req, "w", Default).
+
 
 json_body(Httpd) ->
     case body(Httpd) of

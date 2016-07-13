@@ -13,12 +13,13 @@
 -module(chttpd_db).
 -include_lib("couch/include/couch_db.hrl").
 -include_lib("couch_mrview/include/couch_mrview.hrl").
+-include("chttpd.hrl").
 
 -export([handle_request/1, handle_compact_req/2, handle_design_req/2,
-    db_req/2, couch_doc_open/4,handle_changes_req/2,
+    db_req/2,handle_changes_req/2,
     update_doc_result_to_json/1, update_doc_result_to_json/2,
     handle_design_info_req/3, handle_view_cleanup_req/2,
-    update_doc/4, http_code_from_status/1]).
+    http_code_from_status/1]).
 
 -import(chttpd,
     [send_json/2,send_json/3,send_json/4,send_method_not_allowed/2,
@@ -89,7 +90,7 @@ handle_changes_req1(#httpd{}=Req, Db) ->
     case ChangesArgs#changes_args.feed of
     "normal" ->
         T0 = os:timestamp(),
-        {ok, Info} = fabric:get_db_info(Db),
+        {ok, Info} = ?API_MOD:get_db_info(Db),
         Etag = chttpd:make_etag(Info),
         DeltaT = timer:now_diff(os:timestamp(), T0) / 1000,
         couch_stats:update_histogram([couchdb, dbinfo], DeltaT),
@@ -100,7 +101,7 @@ handle_changes_req1(#httpd{}=Req, Db) ->
                 mochi = Req,
                 threshold = Max
             },
-            fabric:changes(Db, fun changes_callback/2, Acc0, ChangesArgs)
+            ?API_MOD:changes(Db, fun changes_callback/2, Acc0, ChangesArgs)
         end);
     Feed when Feed =:= "continuous"; Feed =:= "longpoll"; Feed =:= "eventsource"  ->
         couch_stats:increment_counter([couchdb, httpd, clients_requesting_changes]),
@@ -110,7 +111,7 @@ handle_changes_req1(#httpd{}=Req, Db) ->
             threshold = Max
         },
         try
-            fabric:changes(Db, fun changes_callback/2, Acc0, ChangesArgs)
+            ?API_MOD:changes(Db, fun changes_callback/2, Acc0, ChangesArgs)
         after
             couch_stats:decrement_counter([couchdb, httpd, clients_requesting_changes])
         end;
@@ -230,7 +231,7 @@ handle_compact_req(Req, _) ->
     couch_httpd:send_error(Req, 403, forbidden, Msg).
 
 handle_view_cleanup_req(Req, Db) ->
-    ok = fabric:cleanup_index_files(Db),
+    ok = ?API_MOD:cleanup_index_files(Db),
     send_json(Req, 202, {[{ok, true}]}).
 
 handle_design_req(#httpd{
@@ -253,7 +254,7 @@ bad_action_req(#httpd{path_parts=[_, _, Name|FileNameParts]}=Req, Db, _DDoc) ->
 
 handle_design_info_req(#httpd{method='GET'}=Req, Db, #doc{} = DDoc) ->
     [_, _, Name, _] = Req#httpd.path_parts,
-    {ok, GroupInfoList} = fabric:get_view_group_info(Db, DDoc),
+    {ok, GroupInfoList} = ?API_MOD:get_view_group_info(Db, DDoc),
     send_json(Req, 200, {[
         {name,  Name},
         {view_index, {GroupInfoList}}
@@ -268,7 +269,7 @@ create_db_req(#httpd{}=Req, DbName) ->
     Q = chttpd:qs_value(Req, "q", config:get("cluster", "q", "8")),
     P = chttpd:qs_value(Req, "placement", config:get("cluster", "placement")),
     DocUrl = absolute_uri(Req, "/" ++ couch_util:url_encode(DbName)),
-    case fabric:create_db(DbName, [{n,N}, {q,Q}, {placement,P}]) of
+    case ?API_MOD:create_db(DbName, [{n,N}, {q,Q}, {placement,P}]) of
     ok ->
         send_json(Req, 201, [{"Location", DocUrl}], {[{ok, true}]});
     accepted ->
@@ -281,7 +282,7 @@ create_db_req(#httpd{}=Req, DbName) ->
 
 delete_db_req(#httpd{}=Req, DbName) ->
     couch_httpd:verify_is_server_admin(Req),
-    case fabric:delete_db(DbName, []) of
+    case ?API_MOD:delete_db(DbName, []) of
     ok ->
         send_json(Req, 200, {[{ok, true}]});
     accepted ->
@@ -291,22 +292,20 @@ delete_db_req(#httpd{}=Req, DbName) ->
     end.
 
 do_db_req(#httpd{path_parts=[DbName|_], user_ctx=Ctx}=Req, Fun) ->
-    fabric:get_security(DbName, [{user_ctx,Ctx}]), % calls check_is_reader
+    ?API_MOD:get_security(DbName, [{user_ctx,Ctx}]), % calls check_is_reader
     Fun(Req, #db{name=DbName, user_ctx=Ctx}).
 
-db_req(#httpd{method='GET',path_parts=[DbName]}=Req, _Db) ->
+db_req(#httpd{method='GET',path_parts=[_]}=Req, Db) ->
     % measure the time required to generate the etag, see if it's worth it
     T0 = os:timestamp(),
-    {ok, DbInfo} = fabric:get_db_info(DbName),
+    {ok, DbInfo} = ?API_MOD:get_db_info(Db),
     DeltaT = timer:now_diff(os:timestamp(), T0) / 1000,
     couch_stats:update_histogram([couchdb, dbinfo], DeltaT),
     send_json(Req, {DbInfo});
 
-db_req(#httpd{method='POST', path_parts=[DbName], user_ctx=Ctx}=Req, Db) ->
+db_req(#httpd{method='POST', path_parts=[_], user_ctx=Ctx}=Req, Db) ->
     chttpd:validate_ctype(Req, "application/json"),
-
-    W = chttpd:qs_value(Req, "w", integer_to_list(mem3:quorum(Db))),
-    Options = [{user_ctx,Ctx}, {w,W}],
+    Options = [{user_ctx,Ctx}, {w, chttpd:get_w(Req, Db)}],
 
     Doc = couch_doc:from_json_obj(chttpd:json_body(Req)),
     Doc2 = case Doc#doc.id of
@@ -320,7 +319,7 @@ db_req(#httpd{method='POST', path_parts=[DbName], user_ctx=Ctx}=Req, Db) ->
     "ok" ->
         % async_batching
         spawn(fun() ->
-                case catch(fabric:update_doc(Db, Doc2, Options)) of
+                case catch(?API_MOD:update_doc(Db, Doc2, Options)) of
                 {ok, _} -> ok;
                 {accepted, _} -> ok;
                 Error ->
@@ -334,9 +333,10 @@ db_req(#httpd{method='POST', path_parts=[DbName], user_ctx=Ctx}=Req, Db) ->
         ]});
     _Normal ->
         % normal
+        DbName = mem3:dbname(Db#db.name),
         DocUrl = absolute_uri(Req, [$/, couch_util:url_encode(DbName),
             $/, couch_util:url_encode(DocId)]),
-        case fabric:update_doc(Db, Doc2, Options) of
+        case ?API_MOD:update_doc(Db, Doc2, Options) of
         {ok, NewRev} ->
             HttpCode = 201;
         {accepted, NewRev} ->
@@ -379,7 +379,7 @@ db_req(#httpd{method='POST',path_parts=[_,<<"_bulk_docs">>], user_ctx=Ctx}=Req, 
     Value when is_integer(Value) ->
         integer_to_list(Value);
     _ ->
-        chttpd:qs_value(Req, "w", integer_to_list(mem3:quorum(Db)))
+        chttpd:get_w(Req, Db)
     end,
     case chttpd:header_value(Req, "X-Couch-Full-Commit") of
     "true" ->
@@ -407,7 +407,7 @@ db_req(#httpd{method='POST',path_parts=[_,<<"_bulk_docs">>], user_ctx=Ctx}=Req, 
         true  -> [all_or_nothing|Options];
         _ -> Options
         end,
-        case fabric:update_docs(Db, Docs, Options2) of
+        case ?API_MOD:update_docs(Db, Docs, Options2) of
         {ok, Results} ->
             % output the results
             DocResults = lists:zipwith(fun update_doc_result_to_json/2,
@@ -426,7 +426,7 @@ db_req(#httpd{method='POST',path_parts=[_,<<"_bulk_docs">>], user_ctx=Ctx}=Req, 
     false ->
         Docs = [couch_doc:from_json_obj(JsonObj) || JsonObj <- DocsArray],
         [validate_attachment_names(D) || D <- Docs],
-        case fabric:update_docs(Db, Docs, [replicated_changes|Options]) of
+        case ?API_MOD:update_docs(Db, Docs, [replicated_changes|Options]) of
         {ok, Errors} ->
             ErrorsJson = lists:map(fun update_doc_result_to_json/1, Errors),
             send_json(Req, 201, ErrorsJson);
@@ -456,8 +456,8 @@ db_req(#httpd{method='POST', path_parts=[_, <<"_bulk_get">>]}=Req, Db) ->
             send_chunk(Resp, <<"{\"results\": [">>),
 
             lists:foldl(fun(Doc, Sep) ->
-                {DocId, Results, Options1} = bulk_get_open_doc_revs(Db, Doc,
-                                                                    Options),
+                {DocId, Results, Options1} =
+                    bulk_get_open_doc_revs(Req, Db, Doc, Options),
                 bulk_get_send_docs_json(Resp, DocId, Results, Options1, Sep),
                 <<",">>
             end, <<"">>, Docs),
@@ -473,7 +473,7 @@ db_req(#httpd{method='POST',path_parts=[_,<<"_purge">>]}=Req, Db) ->
     chttpd:validate_ctype(Req, "application/json"),
     {IdsRevs} = chttpd:json_body_obj(Req),
     IdsRevs2 = [{Id, couch_doc:parse_revs(Revs)} || {Id, Revs} <- IdsRevs],
-    case fabric:purge_docs(Db, IdsRevs2) of
+    case ?API_MOD:purge_docs(Db, IdsRevs2) of
     {ok, PurgeSeq, PurgedIdsRevs} ->
         PurgedIdsRevs2 = [{Id, couch_doc:revs_to_strs(Revs)} || {Id, Revs}
             <- PurgedIdsRevs],
@@ -516,7 +516,7 @@ db_req(#httpd{path_parts=[_,OP]}=Req, _Db) when ?IS_ALL_DOCS(OP) ->
 db_req(#httpd{method='POST',path_parts=[_,<<"_missing_revs">>]}=Req, Db) ->
     chttpd:validate_ctype(Req, "application/json"),
     {JsonDocIdRevs} = chttpd:json_body_obj(Req),
-    {ok, Results} = fabric:get_missing_revs(Db, JsonDocIdRevs),
+    {ok, Results} = ?API_MOD:get_missing_revs(Db, JsonDocIdRevs),
     Results2 = [{Id, couch_doc:revs_to_strs(Revs)} || {Id, Revs, _} <- Results],
     send_json(Req, {[
         {missing_revs, {Results2}}
@@ -528,7 +528,7 @@ db_req(#httpd{path_parts=[_,<<"_missing_revs">>]}=Req, _Db) ->
 db_req(#httpd{method='POST',path_parts=[_,<<"_revs_diff">>]}=Req, Db) ->
     chttpd:validate_ctype(Req, "application/json"),
     {JsonDocIdRevs} = chttpd:json_body_obj(Req),
-    {ok, Results} = fabric:get_missing_revs(Db, JsonDocIdRevs),
+    {ok, Results} = ?API_MOD:get_missing_revs(Db, JsonDocIdRevs),
     Results2 =
     lists:map(fun({Id, MissingRevs, PossibleAncestors}) ->
         {Id,
@@ -548,7 +548,7 @@ db_req(#httpd{path_parts=[_,<<"_revs_diff">>]}=Req, _Db) ->
 db_req(#httpd{method='PUT',path_parts=[_,<<"_security">>],user_ctx=Ctx}=Req,
         Db) ->
     SecObj = chttpd:json_body(Req),
-    case fabric:set_security(Db, SecObj, [{user_ctx, Ctx}]) of
+    case ?API_MOD:set_security(Db, SecObj, [{user_ctx, Ctx}]) of
         ok ->
             send_json(Req, {[{<<"ok">>, true}]});
         Else ->
@@ -556,7 +556,7 @@ db_req(#httpd{method='PUT',path_parts=[_,<<"_security">>],user_ctx=Ctx}=Req,
     end;
 
 db_req(#httpd{method='GET',path_parts=[_,<<"_security">>]}=Req, Db) ->
-    send_json(Req, fabric:get_security(Db));
+    send_json(Req, ?API_MOD:get_security(Db));
 
 db_req(#httpd{path_parts=[_,<<"_security">>]}=Req, _Db) ->
     send_method_not_allowed(Req, "PUT,GET");
@@ -564,11 +564,11 @@ db_req(#httpd{path_parts=[_,<<"_security">>]}=Req, _Db) ->
 db_req(#httpd{method='PUT',path_parts=[_,<<"_revs_limit">>],user_ctx=Ctx}=Req,
         Db) ->
     Limit = chttpd:json_body(Req),
-    ok = fabric:set_revs_limit(Db, Limit, [{user_ctx,Ctx}]),
+    ok = ?API_MOD:set_revs_limit(Db, Limit, [{user_ctx,Ctx}]),
     send_json(Req, {[{<<"ok">>, true}]});
 
 db_req(#httpd{method='GET',path_parts=[_,<<"_revs_limit">>]}=Req, Db) ->
-    send_json(Req, fabric:get_revs_limit(Db));
+    send_json(Req, ?API_MOD:get_revs_limit(Db));
 
 db_req(#httpd{path_parts=[_,<<"_revs_limit">>]}=Req, _Db) ->
     send_method_not_allowed(Req, "PUT,GET");
@@ -615,12 +615,12 @@ all_docs_view(Req, Db, Keys, OP) ->
     Options = [{user_ctx, Req#httpd.user_ctx}],
     Max = chttpd:chunked_response_buffer_size(),
     VAcc = #vacc{db=Db, req=Req, threshold=Max},
-    {ok, Resp} = fabric:all_docs(Db, Options, fun couch_mrview_http:view_cb/2, VAcc, Args3),
+    {ok, Resp} = ?API_MOD:all_docs(Db, Options, fun couch_mrview_http:view_cb/2, VAcc, Args3),
     {ok, Resp#vacc.resp}.
 
 db_doc_req(#httpd{method='DELETE'}=Req, Db, DocId) ->
     % check for the existence of the doc to handle the 404 case.
-    couch_doc_open(Db, DocId, nil, []),
+    couch_doc_open(Req, Db, DocId, nil, []),
     case chttpd:qs_value(Req, "rev") of
     undefined ->
         Body = {[{<<"_deleted">>,true}]};
@@ -644,10 +644,10 @@ db_doc_req(#httpd{method='GET', mochi_req=MochiReq}=Req, Db, DocId) ->
             [{atts_since, AttsSince}, attachments | Options];
         true -> Options
         end,
-        Doc = couch_doc_open(Db, DocId, Rev, Options2),
+        Doc = couch_doc_open(Req, Db, DocId, Rev, Options2),
         send_doc(Req, Doc, Options2);
     _ ->
-        {ok, Results} = fabric:open_revs(Db, DocId, Revs, Options),
+        {ok, Results} = ?API_MOD:open_revs(Db, DocId, Revs, Options),
         case Results of
             [] when Revs == all ->
                 chttpd:send_error(Req, {not_found, missing});
@@ -686,8 +686,7 @@ db_doc_req(#httpd{method='POST', user_ctx=Ctx}=Req, Db, DocId) ->
     couch_doc:validate_docid(DocId),
     chttpd:validate_ctype(Req, "multipart/form-data"),
 
-    W = chttpd:qs_value(Req, "w", integer_to_list(mem3:quorum(Db))),
-    Options = [{user_ctx,Ctx}, {w,W}],
+    Options = [{user_ctx,Ctx}, {w,chttpd:get_w(Req, Db)}],
 
     Form = couch_httpd:parse_form(Req),
     case proplists:is_defined("_doc", Form) of
@@ -696,7 +695,7 @@ db_doc_req(#httpd{method='POST', user_ctx=Ctx}=Req, Db, DocId) ->
         Doc = couch_doc_from_req(Req, DocId, Json);
     false ->
         Rev = couch_doc:parse_rev(list_to_binary(couch_util:get_value("_rev", Form))),
-        {ok, [{ok, Doc}]} = fabric:open_revs(Db, DocId, [Rev], [])
+        {ok, [{ok, Doc}]} = ?API_MOD:open_revs(Db, DocId, [Rev], [])
     end,
     UpdatedAtts = [
         couch_att:new([
@@ -719,7 +718,7 @@ db_doc_req(#httpd{method='POST', user_ctx=Ctx}=Req, Db, DocId) ->
     NewDoc = Doc#doc{
         atts = UpdatedAtts ++ OldAtts2
     },
-    case fabric:update_doc(Db, NewDoc, Options) of
+    case ?API_MOD:update_doc(Db, NewDoc, Options) of
     {ok, NewRev} ->
         HttpCode = 201;
     {accepted, NewRev} ->
@@ -737,8 +736,7 @@ db_doc_req(#httpd{method='PUT', user_ctx=Ctx}=Req, Db, DocId) ->
     } = parse_doc_query(Req),
     couch_doc:validate_docid(DocId),
 
-    W = chttpd:qs_value(Req, "w", integer_to_list(mem3:quorum(Db))),
-    Options = [{user_ctx,Ctx}, {w,W}],
+    Options = [{user_ctx,Ctx}, {w,chttpd:get_w(Req, Db)}],
 
     Loc = absolute_uri(Req, [$/, couch_util:url_encode(Db#db.name),
         $/, couch_util:url_encode(DocId)]),
@@ -765,7 +763,7 @@ db_doc_req(#httpd{method='PUT', user_ctx=Ctx}=Req, Db, DocId) ->
             Doc = couch_doc_from_req(Req, DocId, chttpd:json_body(Req)),
 
             spawn(fun() ->
-                    case catch(fabric:update_doc(Db, Doc, Options)) of
+                    case catch(?API_MOD:update_doc(Db, Doc, Options)) of
                     {ok, _} -> ok;
                     {accepted, _} -> ok;
                     Error ->
@@ -792,9 +790,9 @@ db_doc_req(#httpd{method='COPY', user_ctx=Ctx}=Req, Db, SourceDocId) ->
     end,
     {TargetDocId, TargetRevs} = couch_httpd_db:parse_copy_destination_header(Req),
     % open old doc
-    Doc = couch_doc_open(Db, SourceDocId, SourceRev, []),
+    Doc = couch_doc_open(Req, Db, SourceDocId, SourceRev, []),
     % save new doc
-    case fabric:update_doc(Db,
+    case ?API_MOD:update_doc(Db,
         Doc#doc{id=TargetDocId, revs=TargetRevs}, [{user_ctx,Ctx}]) of
     {ok, NewTargetRev} ->
         HttpCode = 201;
@@ -921,7 +919,7 @@ send_updated_doc(Req, Db, DocId, Doc, Headers) ->
 
 send_updated_doc(#httpd{user_ctx=Ctx} = Req, Db, DocId, #doc{deleted=Deleted}=Doc,
         Headers, UpdateType) ->
-    W = chttpd:qs_value(Req, "w", integer_to_list(mem3:quorum(Db))),
+    W = chttpd:get_w(Req, Db),
     Options =
         case couch_httpd:header_value(Req, "X-Couch-Full-Commit") of
         "true" ->
@@ -931,7 +929,7 @@ send_updated_doc(#httpd{user_ctx=Ctx} = Req, Db, DocId, #doc{deleted=Deleted}=Do
         _ ->
             [UpdateType, {user_ctx,Ctx}, {w,W}]
         end,
-    {Status, {etag, Etag}, Body} = update_doc(Db, DocId,
+    {Status, {etag, Etag}, Body} = update_doc(Req, Db, DocId,
         #doc{deleted=Deleted}=Doc, Options),
     HttpCode = http_code_from_status(Status),
     ResponseHeaders = [{"Etag", Etag} | Headers],
@@ -947,9 +945,9 @@ http_code_from_status(Status) ->
             200
     end.
 
-update_doc(Db, DocId, #doc{deleted=Deleted, body=DocBody}=Doc, Options) ->
+update_doc(Req, Db, DocId, #doc{deleted=Deleted, body=DocBody}=Doc, Options) ->
     {_, Ref} = spawn_monitor(fun() ->
-        try fabric:update_doc(Db, Doc, Options) of
+        try ?API_MOD:update_doc(Db, Doc, Options) of
             Resp ->
                 exit({exit_ok, Resp})
         catch
@@ -1022,22 +1020,18 @@ couch_doc_from_req(Req, DocId, Json) ->
     couch_doc_from_req(Req, DocId, couch_doc:from_json_obj(Json)).
 
 
-% Useful for debugging
-% couch_doc_open(Db, DocId) ->
-%   couch_doc_open(Db, DocId, nil, []).
-
-couch_doc_open(#db{} = Db, DocId, Rev, Options0) ->
+couch_doc_open(Req, #db{} = Db, DocId, Rev, Options0) ->
     Options = [{user_ctx, Db#db.user_ctx} | Options0],
     case Rev of
     nil -> % open most recent rev
-        case fabric:open_doc(Db, DocId, Options) of
+        case ?API_MOD:open_doc(Db, DocId, Options) of
         {ok, Doc} ->
             Doc;
          Error ->
              throw(Error)
          end;
   _ -> % open a specific rev (deletions come back as stubs)
-      case fabric:open_revs(Db, DocId, [Rev], Options) of
+      case ?API_MOD:open_revs(Db, DocId, [Rev], Options) of
           {ok, [{ok, Doc}]} ->
               Doc;
           {ok, [{{not_found, missing}, Rev}]} ->
@@ -1058,7 +1052,7 @@ db_attachment_req(#httpd{method='GET',mochi_req=MochiReq}=Req, Db, DocId, FileNa
     } = parse_doc_query(Req),
     #doc{
         atts=Atts
-    } = Doc = couch_doc_open(Db, DocId, Rev, Options),
+    } = Doc = couch_doc_open(Req, Db, DocId, Rev, Options),
     case [A || A <- Atts, couch_att:fetch(name, A) == FileName] of
     [] ->
         throw({not_found, "Document is missing attachment"});
@@ -1172,7 +1166,7 @@ db_attachment_req(#httpd{method=Method, user_ctx=Ctx}=Req, Db, DocId, FileNamePa
                 undefined -> <<"application/octet-stream">>;
                 CType -> list_to_binary(CType)
             end,
-            Data = fabric:att_receiver(Req, chttpd:body_length(Req)),
+            Data = ?API_MOD:att_receiver(Req, chttpd:body_length(Req)),
             ContentLen = case couch_httpd:header_value(Req,"Content-Length") of
                 undefined -> undefined;
                 Length -> list_to_integer(Length)
@@ -1206,7 +1200,7 @@ db_attachment_req(#httpd{method=Method, user_ctx=Ctx}=Req, Db, DocId, FileNamePa
             couch_doc:validate_docid(DocId),
             #doc{id=DocId};
         Rev ->
-            case fabric:open_revs(Db, DocId, [Rev], []) of
+            case ?API_MOD:open_revs(Db, DocId, [Rev], []) of
             {ok, [{ok, Doc0}]}  -> Doc0;
             {ok, [Error]}       -> throw(Error)
             end
@@ -1216,7 +1210,7 @@ db_attachment_req(#httpd{method=Method, user_ctx=Ctx}=Req, Db, DocId, FileNamePa
     DocEdited = Doc#doc{
         atts = NewAtt ++ [A || A <- Atts, couch_att:fetch(name, A) /= FileName]
     },
-    case fabric:update_doc(Db, DocEdited, [{user_ctx,Ctx}]) of
+    case ?API_MOD:update_doc(Db, DocEdited, [{user_ctx,Ctx}]) of
     {ok, UpdatedRev} ->
         HttpCode = 201;
     {accepted, UpdatedRev} ->
@@ -1524,11 +1518,11 @@ throw_bad_query_param(Key) when is_binary(Key) ->
     throw({bad_request, Msg}).
 
 
-bulk_get_open_doc_revs(Db, {Props}, Options) ->
-    bulk_get_open_doc_revs1(Db, Props, Options, {}).
+bulk_get_open_doc_revs(Req, Db, {Props}, Options) ->
+    bulk_get_open_doc_revs1(Req, Db, Props, Options, {}).
 
 
-bulk_get_open_doc_revs1(Db, Props, Options, {}) ->
+bulk_get_open_doc_revs1(Req, Db, Props, Options, {}) ->
     case parse_field(<<"id">>, couch_util:get_value(<<"id">>, Props)) of
         {error, {DocId, Error, Reason}} ->
             {DocId, {error, {null, Error, Reason}}, Options};
@@ -1538,9 +1532,9 @@ bulk_get_open_doc_revs1(Db, Props, Options, {}) ->
             {null, {error, Error}, Options};
 
         {ok, DocId} ->
-            bulk_get_open_doc_revs1(Db, Props, Options, {DocId})
+            bulk_get_open_doc_revs1(Req, Db, Props, Options, {DocId})
     end;
-bulk_get_open_doc_revs1(Db, Props, Options, {DocId}) ->
+bulk_get_open_doc_revs1(Req, Db, Props, Options, {DocId}) ->
     RevStr = couch_util:get_value(<<"rev">>, Props),
 
     case parse_field(<<"rev">>, RevStr) of
@@ -1548,12 +1542,12 @@ bulk_get_open_doc_revs1(Db, Props, Options, {DocId}) ->
             {DocId, {error, {RevStr, Error, Reason}}, Options};
 
         {ok, undefined} ->
-            bulk_get_open_doc_revs1(Db, Props, Options, {DocId, all});
+            bulk_get_open_doc_revs1(Req, Db, Props, Options, {DocId, all});
 
         {ok, Rev} ->
-            bulk_get_open_doc_revs1(Db, Props, Options, {DocId, [Rev]})
+            bulk_get_open_doc_revs1(Req, Db, Props, Options, {DocId, [Rev]})
     end;
-bulk_get_open_doc_revs1(Db, Props, Options, {DocId, Revs}) ->
+bulk_get_open_doc_revs1(Req, Db, Props, Options, {DocId, Revs}) ->
     AttsSinceStr = couch_util:get_value(<<"atts_since">>, Props),
 
     case parse_field(<<"atts_since">>, AttsSinceStr) of
@@ -1561,14 +1555,14 @@ bulk_get_open_doc_revs1(Db, Props, Options, {DocId, Revs}) ->
             {DocId, {error, {BadAttsSinceRev, Error, Reason}}, Options};
 
         {ok, []} ->
-            bulk_get_open_doc_revs1(Db, Props, Options, {DocId, Revs, Options});
+            bulk_get_open_doc_revs1(Req, Db, Props, Options, {DocId, Revs, Options});
 
         {ok, RevList} ->
             Options1 = [{atts_since, RevList}, attachments | Options],
-            bulk_get_open_doc_revs1(Db, Props, Options, {DocId, Revs, Options1})
+            bulk_get_open_doc_revs1(Req, Db, Props, Options, {DocId, Revs, Options1})
     end;
-bulk_get_open_doc_revs1(Db, Props, _, {DocId, Revs, Options}) ->
-    case fabric:open_revs(Db, DocId, Revs, Options) of
+bulk_get_open_doc_revs1(Req, Db, Props, _, {DocId, Revs, Options}) ->
+    case ?API_MOD:open_revs(Db, DocId, Revs, Options) of
         {ok, []} ->
             RevStr = couch_util:get_value(<<"rev">>, Props),
             Error = {RevStr, <<"not_found">>, <<"missing">>},

@@ -32,6 +32,7 @@
 
 -include_lib("couch/include/couch_db.hrl").
 -include_lib("couch_mrview/include/couch_mrview.hrl").
+-include("chttpd.hrl").
 
 -import(chttpd,
     [send_json/2,send_json/3,send_method_not_allowed/2,
@@ -106,13 +107,14 @@ handle_all_dbs_req(#httpd{method='GET'}=Req) ->
     ShardDbName = config:get("mem3", "shards_db", "_dbs"),
     %% shard_db is not sharded but mem3:shards treats it as an edge case
     %% so it can be pushed thru fabric
-    {ok, Info} = fabric:get_db_info(ShardDbName),
+    {ok, Info} = ?API_MOD:get_db_info(ShardDbName),
     Etag = couch_httpd:make_etag({Info}),
     Options = [{user_ctx, Req#httpd.user_ctx}],
+    CBFun = fun all_dbs_callback/2,
     {ok, Resp} = chttpd:etag_respond(Req, Etag, fun() ->
         {ok, Resp} = chttpd:start_delayed_json_response(Req, 200, [{"Etag",Etag}]),
         VAcc = #vacc{req=Req,resp=Resp},
-        fabric:all_docs(ShardDbName, Options, fun all_dbs_callback/2, VAcc, Args)
+        ?API_MOD:all_docs(ShardDbName, Options, CBFun, VAcc, Args)
     end),
     case is_record(Resp, vacc) of
         true -> {ok, Resp#vacc.resp};
