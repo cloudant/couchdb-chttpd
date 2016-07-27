@@ -19,7 +19,9 @@
     stop_couch/1,
 
     start_cluster/0,
-    stop_cluster/1
+    stop_cluster/1,
+
+    collect_tests/1
 ]).
 
 -export([
@@ -56,6 +58,49 @@ stop_cluster(Nodes) ->
         ok = rpc:call(Node, ?MODULE, stop_couch, [Ctx]),
         ok = slave:stop(Node)
     end, Nodes).
+
+
+collect_tests(SuiteName) ->
+    {ok, [[Root]]} = init:get_argument(root),
+    lists:flatmap(fun(Path) ->
+        case lists:prefix(Root, Path) of
+            true ->
+                [];
+            false ->
+                collect_tests(SuiteName, Path)
+        end
+    end, code:get_path()).
+
+
+collect_tests(SuiteName, Path) ->
+    FileNames = filelib:wildcard(filename:join(Path, "*.beam")),
+    lists:flatmap(fun(FileName) ->
+        ModName = list_to_atom(filename:rootname(filename:basename(FileName))),
+        Attrs = ModName:module_info(attributes),
+        case lists:keyfind(test_suite, 1, Attrs) of
+            {test_suite, Suites} ->
+                case lists:member(SuiteName, Suites) of
+                    true ->
+                        collect_tests_int(ModName);
+                    false ->
+                        []
+                end;
+            false ->
+                []
+        end
+    end, FileNames).
+
+
+collect_tests_int(ModName) ->
+    Funs = ModName:module_info(exports),
+    lists:flatmap(fun({Name, Arity}) ->
+        case atom_to_list(Name) of
+            "t_" ++ _ when Arity == 0 ->
+                [fun ModName:Name/Arity];
+            _ ->
+                []
+        end
+    end, Funs).
 
 
 init_cluster_node() ->

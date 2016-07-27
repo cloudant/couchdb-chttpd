@@ -10,23 +10,13 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(chttpd_api_test).
+-module(chttpd_api_welcome).
+-test_suite(chttpd_api).
+
 
 -include_lib("eunit/include/eunit.hrl").
--include("chttpd_test.hrl").
+-include_lib("chttpd/include/chttpd_test.hrl").
 
 
-api_test_() ->
-    {
-        setup,
-        fun chttpd_test_util:start_cluster/0,
-        fun chttpd_test_util:stop_cluster/1,
-        [
-            fun check_nodes/0
-        ] ++ chttpd_test_util:collect_tests(chttpd_api)
-    }.
-
-
-check_nodes() ->
-    Expect = [?CLUSTER_CTRL_NODE | ?CLUSTER_DB_NODES],
-    ?assertEqual(Expect, [node() | nodes()]).
+t_welcome() ->
+    ohai.

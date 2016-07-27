@@ -17,3 +17,7 @@
     'db3@127.0.0.1'
 ]).
 
+
+-ifndef(NOTEST).
+-compile({parse_transform, chttpd_test_pt}).
+-endif.
