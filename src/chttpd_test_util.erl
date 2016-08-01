@@ -29,6 +29,7 @@
 ]).
 
 
+-include_lib("couch/include/couch_db.hrl").
 -include_lib("couch/include/couch_eunit.hrl").
 -include("chttpd_test.hrl").
 
@@ -45,12 +46,14 @@ stop_couch(Ctx) ->
 
 start_cluster() ->
     maybe_start_networking(),
-    lists:map(fun(Node) ->
+    Ctx = lists:map(fun(Node) ->
         [Name, Host] = split_node(Node),
         {ok, Node} = slave:start_link(Host, Name, path_arg()),
         {ok, Ctx} = rpc:call(Node, ?MODULE, init_cluster_node, []),
         {Node, Ctx}
-    end, ?CLUSTER_DB_NODES).
+    end, ?CLUSTER_DB_NODES),
+    join_cluster(),
+    Ctx.
 
 
 stop_cluster(Nodes) ->
@@ -108,6 +111,31 @@ init_cluster_node() ->
     NodeCfg = filename:join([?BUILDDIR(), "tmp", "etc", Name ++ ".ini"]),
     Chain = ?CONFIG_CHAIN ++ [NodeCfg],
     {ok, start_couch(Chain)}.
+
+
+join_cluster() ->
+    % Rather than deal with timing issues we just
+    % attempt to create the nodes db doc for all
+    % nodes on each node. Theoretically we could wait
+    % for internal replication but that'd get messy.
+    SetupFun = fun() ->
+        DbName = config:get("mem3", "nodes_db", "_nodes"),
+        {ok, Db} = mem3_util:ensure_exists(DbName),
+        lists:foreach(fun(Node) ->
+            Doc = #doc{id = couch_util:to_binary(Node)},
+            try
+                couch_db:update_doc(Db, Doc, [])
+            catch throw:conflict ->
+                % We expect to hit conflicts after the first
+                % join and due to racing internal replication.
+                ignore
+            end
+        end, ?CLUSTER_DB_NODES),
+        ok
+    end,
+    lists:foreach(fun(Node) ->
+        ok = rpc:call(Node, erlang, apply, [SetupFun, []])
+    end, ?CLUSTER_DB_NODES).
 
 
 maybe_start_networking() ->

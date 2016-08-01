@@ -22,11 +22,20 @@ api_test_() ->
         fun chttpd_test_util:start_cluster/0,
         fun chttpd_test_util:stop_cluster/1,
         [
-            fun check_nodes/0
+            fun check_nodes/0,
+            fun check_mem3_nodes/0
         ] ++ chttpd_test_util:collect_tests(chttpd_api)
     }.
 
 
 check_nodes() ->
-    Expect = [?CLUSTER_CTRL_NODE | ?CLUSTER_DB_NODES],
-    ?assertEqual(Expect, [node() | nodes()]).
+    Expect = lists:sort([?CLUSTER_CTRL_NODE | ?CLUSTER_DB_NODES]),
+    ?assertEqual(Expect, lists:sort([node() | nodes()])).
+
+
+check_mem3_nodes() ->
+    Expect = lists:sort(?CLUSTER_DB_NODES),
+    lists:foreach(fun(Node) ->
+        Resp = rpc:call(Node, mem3, nodes, []),
+        ?assertEqual(Expect, lists:sort(Resp))
+    end, ?CLUSTER_DB_NODES).
