@@ -110,7 +110,9 @@ init_cluster_node() ->
     [Name, _] = split_node(node()),
     NodeCfg = filename:join([?BUILDDIR(), "tmp", "etc", Name ++ ".ini"]),
     Chain = ?CONFIG_CHAIN ++ [NodeCfg],
-    {ok, start_couch(Chain)}.
+    Ctx = start_couch(Chain),
+    ok = config:set("admins", ?ADM_USER, ?ADM_PASS),
+    {ok, Ctx}.
 
 
 join_cluster() ->

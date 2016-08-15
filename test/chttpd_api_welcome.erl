@@ -14,9 +14,12 @@
 -test_suite(chttpd_api).
 
 
--include_lib("eunit/include/eunit.hrl").
 -include_lib("chttpd/include/chttpd_test.hrl").
 
 
 t_welcome() ->
-    ohai.
+    Resp = ?http(get, "/"),
+    ?status(Resp, 200),
+    %?hdrinc(Resp, ["Server", "Date", "Content-Type", "Content-Length"]),
+    %?hdrmatch(Resp, {"Content-Type", "application/json"}),
+    io:format(standard_error, "RESP: ~p~n", [Resp]).
