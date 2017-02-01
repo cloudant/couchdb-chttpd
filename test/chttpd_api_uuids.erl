@@ -10,23 +10,16 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(chttpd_api_welcome).
+-module(chttpd_api_favicon).
 -test_suite(chttpd_api).
 
 
 -include_lib("chttpd/include/chttpd_test.hrl").
 
 
-t_welcome() ->
-    Resp = ?http(get, "/"),
-    ?assert_that(Resp, has_status(200)),
-    ?assert_that(Resp, has_headers_matching([
-        {"Server", '_'},
-        {"Date", '_'}
-    ])),
-    ?assert_that(Resp, has_header("Content-Type", "application/json")),
-    ?assert_that(Resp, has_json_body_matching(all_of([
-        has_json_entry(couchdb, <<"Welcome">>),
-        has_json_matching(vendor, is_json_object()),
-        has_json_matching(version, is_binary())
-    ]))).
+t_uuids_basic() ->
+    Resp = ?http(get, "_uuids"),
+
+
+t_uuids_limit() ->
+    ok.
